@@ -27,7 +27,3 @@ Down Arrow: Scroll down through the connections list
 Tab: Switch between Established and Listening connections
 q: Quit the application
 
-
----
-
-This README includes the necessary headings and markdown syntax for proper formatting on GitHub. You can copy and paste this into your `README.md` file in your repository.
