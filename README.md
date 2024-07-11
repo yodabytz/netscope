@@ -34,6 +34,13 @@ Simply run the script by typing netscope in your terminal:
 
 netscope
 
+## Controls
+Arrow keys: Navigate through the list of connections.
+
+Tab key: Switch between "Established Connections" and "Listening Connections".
+
+q key: Quit the application.
+
 ## Requirements
 
 Python 3.x
