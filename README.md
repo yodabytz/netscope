@@ -37,8 +37,11 @@ netscope
 ## Requirements
 
 Python 3.x
+
 psutil library
+
 ncurses
+
 A terminal that supports color (like xterm or gnome-terminal)
 
 ## Screenshot
