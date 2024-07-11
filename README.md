@@ -14,12 +14,16 @@ NetScope is a network monitoring application written in Python. It displays esta
    ```bash
    git clone https://github.com/yodabytz/netscope.git
    cd netscope
+2. ## Install the required Python libraries:
 
-2. ## Make the script executable:
+   pip install psutil
+   sudo apt-get install ncurses-dev
+
+4. ## Make the script executable:
 
    chmod +x netscope.py
 
-3. ## Move the script to /usr/bin/ (you might need to use sudo for this step):
+5. ## Move the script to /usr/bin/ (you might need to use sudo for this step):
 
    sudo mv netscope.py /usr/bin/netscope
 
@@ -33,6 +37,7 @@ netscope
 
 Python 3.x
 psutil library
+ncurses
 A terminal that supports color (like xterm or gnome-terminal)
 
 ## Screenshot
