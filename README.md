@@ -17,6 +17,7 @@ NetScope is a network monitoring application written in Python. It displays esta
 2. ## Install the required Python libraries:
 
    pip install psutil
+
    sudo apt-get install ncurses-dev
 
 4. ## Make the script executable:
