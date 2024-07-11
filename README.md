@@ -10,9 +10,6 @@ NetScope is a network monitoring tool that displays established and listening ne
 - Real-time updates with minimal CPU load
 - User-friendly terminal interface
 
-## Screenshot
-![alt Scrrenshot of NetScope in action](https://raw.githubusercontent.com/yodabytz/netscope/main/netscope.jpg?raw=true)
-
 ## Installation
 
 To install the required dependencies, use `pip`:
