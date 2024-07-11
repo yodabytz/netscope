@@ -37,7 +37,7 @@ A terminal that supports color (like xterm or gnome-terminal)
 
 ## Screenshot
 
-![alt text](https://github.com/yodabytz/netscope/main/NetScope.jpg?raw=true)
+![NetScope 1.0](https://raw.githubusercontent.com/yodabytz/netscope/main/NetScope.jpg?raw=true)
 
 ## License
 
