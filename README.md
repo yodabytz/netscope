@@ -11,7 +11,7 @@ NetScope is a network monitoring tool that displays established and listening ne
 - User-friendly terminal interface
 
 ## Screenshot
-![alt Scrrenshot of NetScope in action](?raw=true)
+![alt Scrrenshot of NetScope in action](https://raw.githubusercontent.com/yodabytz/netscope/main/netscope1.0.png?raw=true)
 
 ## Installation
 
