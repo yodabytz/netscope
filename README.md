@@ -58,3 +58,6 @@ A terminal that supports color (like xterm or gnome-terminal)
 ## License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
+
+## Contributions
+Contributions are welcome! Feel free to submit issues or pull requests to improve this script.
