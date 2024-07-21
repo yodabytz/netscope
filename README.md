@@ -1,63 +1,89 @@
-# NetScope 1.0
+# NetScope 2.0 Beta
 
-NetScope is a network monitoring application written in Python. It displays established and listening network connections along with process information, including data sent and received, process ID, program name, and user.
+NetScope is a powerful network and process monitoring tool inspired by `htop`. It allows you to view established connections, listening connections, running processes, and interact with the processes, such as killing them. The tool is designed to be user-friendly and efficient, providing detailed information about your system's network and process activity.
 
 ## Features
 
-- Displays established and listening network connections
-- Shows local and remote addresses, status, PID, program name, user, data sent, and data received
-- Supports real-time updates for network data
+- **Established Connections**: View all established network connections.
+- **Listening Connections**: View all listening network connections.
+- **Both**: View both established and listening connections side-by-side.
+- **Running Processes**: View and interact with running processes. Highlight and kill processes using simple keyboard controls.
+- **Smooth Scrolling**: Efficient and smooth scrolling through lists of connections and processes.
+- **Interactive Commands**: Navigate and interact with the application using intuitive keyboard commands.
 
 ## Installation
 
-1. **Clone the repository:**
-   ```bash
-   git clone https://github.com/yodabytz/netscope.git
-   cd netscope
-2. ## Install the required Python libraries:
+### Requirements
 
-   pip install psutil
-
-   sudo apt-get install ncurses-dev
-
-4. ## Make the script executable:
-
-   chmod +x netscope.py
-
-5. ## Move the script to /usr/bin/ (you might need to use sudo for this step):
-
-   sudo mv netscope.py /usr/bin/netscope
-
-## Usage
-
-Simply run the script by typing netscope in your terminal:
-
-netscope
-
-## Controls
-Arrow keys: Navigate through the list of connections.
-
-Tab key: Switch between "Established Connections" and "Listening Connections".
-
-q key: Quit the application.
-
-## Requirements
-
-Python 3.x
-
-psutil library
-
-ncurses
-
-A terminal that supports color (like xterm or gnome-terminal)
+- Python 3.x
+- `psutil` library
+- `curses` library
 
 ## Screenshot
 
-![NetScope 1.0](https://raw.githubusercontent.com/yodabytz/netscope/main/NetScope.jpg?raw=true)
+![NetScope 1.0](https://raw.githubusercontent.com/yodabytz/NetScope-2.0-Beta/main/Screen%20Shot.png?raw=true)
 
-## License
+### Installation Steps
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+1. **Clone the Repository**:
+    ```sh
+    git clone https://github.com/yodabytz/netscope.git
+    cd netscope
+    ```
 
-## Contributions
-Contributions are welcome! Feel free to submit issues or pull requests to improve this script.
+2. **Install Dependencies**:
+    ```sh
+    pip install psutil
+    ```
+
+3. **Move the Script to /usr/bin**:
+    ```sh
+    sudo cp netscope.py /usr/bin/netscope
+    sudo chmod +x /usr/bin/netscope
+    ```
+
+## Usage:
+
+Run the tool by typing:
+```sh
+netscope
+```
+
+## Controls:
+```Menu Navigation:
+
+Up/Down Arrows or k/j: Navigate through the menu options.
+Enter or Return: Select a menu option.
+q: Quit the application from any screen.
+Established and Listening Connections Screens:
+
+Up/Down Arrows or k/j: Scroll through the list of connections.
+Left Arrow or Backspace: Return to the main menu.
+q: Quit the application.
+Both Connections Screen:
+
+Tab: Switch between Established and Listening sections.
+Up/Down Arrows or k/j: Scroll through the connections in the active section.
+Left Arrow or Backspace: Return to the main menu.
+q: Quit the application.
+Running Processes Screen:
+
+Up/Down Arrows or k/j: Scroll through the list of processes.
+k: Kill the selected process.
+Left Arrow or Backspace: Return to the main menu.
+q: Quit the application.
+```
+
+## License:
+```This project is licensed under the MIT License. See the LICENSE file for details.```
+
+## Author:
+```NetScope 2.0 is developed by Yodabytz. Contributions and feedback are welcome!```
+
+## To Do:
+```
+1) Add more features on the running processes screen
+2) get CPU usage down more (fixed)
+
+If you have any feature requests, let me know
+```
