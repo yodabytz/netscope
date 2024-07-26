@@ -4,22 +4,25 @@ import psutil
 import curses
 import time
 import os
+import platform
 
 def get_process_name(pid):
     try:
         process = psutil.Process(pid)
-        return process.name()
-    except psutil.NoSuchProcess:
+        return process.name()[:20]  # Limit the process name length to 20 characters
+    except (psutil.NoSuchProcess, psutil.AccessDenied):
         return None
 
 def get_process_user(pid):
     try:
         process = psutil.Process(pid)
-        return process.username()
-    except psutil.NoSuchProcess:
+        return process.username()[:15]  # Limit the user name length to 15 characters
+    except (psutil.NoSuchProcess, psutil.AccessDenied):
         return None
 
 def format_size(bytes):
+    if bytes is None:
+        return "N/A"
     for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
         if bytes < 1024:
             return f"{bytes:.2f} {unit}"
@@ -32,7 +35,7 @@ def get_connections(status_filter):
             laddr = f"{conn.laddr.ip}:{conn.laddr.port}".replace('::ffff:', '').ljust(25)
             raddr = f"{conn.raddr.ip}:{conn.raddr.port}".replace('::ffff:', '').ljust(25) if conn.raddr else "".ljust(25)
             status = conn.status.ljust(12)
-            pid = str(conn.pid).ljust(8)
+            pid = str(conn.pid).ljust(8) if conn.pid else "None".ljust(8)
             program = get_process_name(conn.pid).ljust(20) if conn.pid else "".ljust(20)
             user = get_process_user(conn.pid).ljust(15) if conn.pid else "".ljust(15)
             connections.append([laddr, raddr, status, pid, program, user])
@@ -41,19 +44,28 @@ def get_connections(status_filter):
 def get_all_processes():
     processes = []
     for proc in psutil.process_iter(['pid', 'name', 'username', 'nice', 'memory_info', 'memory_percent', 'cpu_percent', 'cpu_times', 'status']):
-        pid = str(proc.info['pid']).ljust(8)
-        user = proc.info['username'].ljust(15)
-        nice = str(proc.info['nice']).ljust(5)
-        memory_info = proc.info['memory_info']
-        memory_percent = f"{proc.info['memory_percent']:.1f}".ljust(6)
-        cpu_percent = f"{proc.info['cpu_percent']:.1f}".ljust(6)
-        status = proc.info['status'].ljust(6)
-        virt = format_size(memory_info.vms).ljust(10) if memory_info else "N/A".ljust(10)
-        res = format_size(memory_info.rss).ljust(10) if memory_info else "N/A".ljust(10)
-        shr = format_size(memory_info.shared).ljust(10) if memory_info else "N/A".ljust(10)
-        cpu_time = f"{proc.info['cpu_times'].user:.2f}".ljust(8)
-        command = proc.info['name'].ljust(20)
-        processes.append([pid, user, nice, virt, res, shr, status, cpu_percent, memory_percent, cpu_time, command])
+        try:
+            pid = str(proc.info['pid']).ljust(8)
+            user = (proc.info['username'][:15] if proc.info['username'] else "N/A").ljust(15)  # Limit the user name length to 15 characters
+            nice = str(proc.info['nice']).ljust(5) if proc.info['nice'] is not None else "N/A".ljust(5)
+            memory_info = proc.info['memory_info']
+            memory_percent = f"{proc.info['memory_percent']:.1f}".ljust(6) if proc.info['memory_percent'] else "N/A".ljust(6)
+            cpu_percent = f"{proc.info['cpu_percent']:.1f}".ljust(6) if proc.info['cpu_percent'] is not None else "0.0".ljust(6)
+            status = proc.info['status'].ljust(8) if proc.info['status'] else "N/A".ljust(8)
+            virt = format_size(memory_info.vms).ljust(10) if memory_info else "N/A".ljust(10)
+            res = format_size(memory_info.rss).ljust(10) if memory_info else "N/A".ljust(10)
+
+            # SHR field fix for Mac
+            if platform.system() == "Darwin":
+                shr = "N/A".ljust(10)  # macOS does not provide shared memory info
+            else:
+                shr = format_size(getattr(memory_info, 'shared', None)).ljust(10) if memory_info else "N/A".ljust(10)
+
+            cpu_time = f"{proc.info['cpu_times'].user:.2f}".ljust(8) if proc.info['cpu_times'] else "N/A".ljust(8)
+            command = proc.info['name'][:20].ljust(20) if proc.info['name'] else "N/A".ljust(20)  # Limit command length to 20 characters
+            processes.append([pid, user, nice, virt, res, shr, status, cpu_percent, memory_percent, cpu_time, command])
+        except (psutil.NoSuchProcess, psutil.AccessDenied, KeyError) as e:
+            processes.append([str(proc.info.get('pid', 'N/A')).ljust(8), "N/A".ljust(15), "N/A".ljust(5), "N/A".ljust(10), "N/A".ljust(10), "N/A".ljust(10), "N/A".ljust(8), "0.0".ljust(6), "N/A".ljust(6), "N/A".ljust(8), "N/A".ljust(20)])
     return processes
 
 def draw_table(window, title, connections, start_y, start_x, width, start_idx, max_lines, active):
@@ -61,26 +73,36 @@ def draw_table(window, title, connections, start_y, start_x, width, start_idx, m
     header_color = curses.color_pair(4)
     text_color = curses.color_pair(1)
 
+    start_x += 1  # Add a left margin
+
     window.addstr(start_y, start_x, title, title_color)
     headers = ["Local Address", "Remote Address", "Status", "PID", "Program", "User", "Data Sent", "Data Recv"]
-    window.addstr(start_y + 1, start_x, ' '.join(f'{header:25}' if i < 2 else f'{header:12}' if i == 2 else f'{header:8}' if i == 3 else f'{header:20}' if i == 4 else f'{header:15}' if i == 5 else f'{header:10}' for i, header in enumerate(headers)), header_color)
+    headers_text = ' '.join(f'{header:25}' if i < 2 else f'{header:12}' if i == 2 else f'{header:8}' if i == 3 else f'{header:20}' if i == 4 else f'{header:15}' if i == 5 else f'{header:10}' for i, header in enumerate(headers))
+    window.addstr(start_y + 1, start_x, headers_text, header_color)
 
     for i, conn in enumerate(connections[start_idx:start_idx + max_lines]):
         window.addstr(start_y + 2 + i, start_x, ' '.join(f'{str(field):25}' if j < 2 else f'{str(field):12}' if j == 2 else f'{str(field):8}' if j == 3 else f'{str(field):20}' if j == 4 else f'{str(field):15}' if j == 5 else f'{str(field):10}' for j, field in enumerate(conn)), text_color)
 
-def draw_process_table(window, title, processes, start_y, start_x, width, start_idx, max_lines, selected_idx):
+def draw_process_table(window, title, processes, start_y, start_x, start_idx, max_lines, selected_idx):
     title_color = curses.color_pair(2) | curses.A_BOLD
     header_color = curses.color_pair(4)
     text_color = curses.color_pair(1)
     selected_color = curses.color_pair(2) | curses.A_REVERSE
 
+    start_x += 1  # Add a left margin
+
+    max_y, max_x = window.getmaxyx()
+    margin = 15
+    table_width = max_x - margin
+
     window.addstr(start_y, start_x, title, title_color)
-    headers = ["PID", "USER", "NI", "VIRT", "RES", "SHR", "S", "CPU%", "MEM%", "TIME+", "Command"]
-    window.addstr(start_y + 1, start_x, ' '.join(f'{header:8}' if i == 0 else f'{header:15}' if i == 1 else f'{header:5}' if i == 2 else f'{header:10}' for i, header in enumerate(headers)), header_color)
+    headers = ["PID", "USER", "NI", "VIRT", "RES", "SHR", "STATUS", "CPU%", "MEM%", "TIME+", "Command"]
+    headers_text = f'{headers[0]:<8}{headers[1]:<15}{headers[2]:<5}{headers[3]:<10}{headers[4]:<10}{headers[5]:<10}{headers[6]:<8} {headers[7]:<6}{headers[8]:<6}{headers[9]:<8} {headers[10]:<20}'
+    window.addstr(start_y + 1, start_x, headers_text[:table_width], header_color)
 
     for i, proc in enumerate(processes[start_idx:start_idx + max_lines]):
         color = selected_color if i + start_idx == selected_idx else text_color
-        window.addstr(start_y + 2 + i, start_x, ' '.join(f'{str(field):8}' if j == 0 else f'{str(field):15}' if j == 1 else f'{str(field):5}' if j == 2 else f'{str(field):10}' for j, field in enumerate(proc)), color)
+        window.addstr(start_y + 2 + i, start_x, f'{proc[0]:<8}{proc[1]:<15}{proc[2]:<5}{proc[3]:<10}{proc[4]:<10}{proc[5]:<10}{proc[6]:<8} {proc[7]:<6}{proc[8]:<6}{proc[9]:<8} {proc[10]:<20}'[:table_width], color)
 
 def splash_screen(stdscr, selected=0):
     curses.start_color()
@@ -212,12 +234,13 @@ def main_screen(stdscr, selected_option):
             if pid and pid.isdigit():
                 pid = int(pid)
                 if pid not in io_data:
-                    try:
-                        p = psutil.Process(pid)
-                        io_counters = p.io_counters()
-                        io_data[pid] = {'sent': io_counters.write_bytes, 'recv': io_counters.read_bytes}
-                    except (psutil.NoSuchProcess, psutil.AccessDenied):
-                        io_data[pid] = {'sent': 0, 'recv': 0}
+                    if platform.system() != "Darwin":
+                        try:
+                            p = psutil.Process(pid)
+                            io_counters = p.io_counters()
+                            io_data[pid] = {'sent': io_counters.write_bytes, 'recv': io_counters.read_bytes}
+                        except (psutil.NoSuchProcess, psutil.AccessDenied, AttributeError):
+                            io_data[pid] = {'sent': 0, 'recv': 0}
 
         buffer.erase()
         buffer.bkgd(curses.color_pair(1))
@@ -229,24 +252,24 @@ def main_screen(stdscr, selected_option):
         if selected_option == 1:
             draw_table(buffer, "Established Connections", [
                 conn + [format_size(io_data.get(int(conn[3].strip()), {}).get('sent', 0)), format_size(io_data.get(int(conn[3].strip()), {}).get('recv', 0))]
-                for conn in established_connections
+                for conn in established_connections if conn[3].strip().isdigit()
             ], 3, 1, max_x - 2, est_start_idx, max_lines, active_section == "ESTABLISHED")
         elif selected_option == 2:
             draw_table(buffer, "Listening Connections", [
                 conn + [format_size(io_data.get(int(conn[3].strip()), {}).get('sent', 0)), format_size(io_data.get(int(conn[3].strip()), {}).get('recv', 0))]
-                for conn in listening_connections
+                for conn in listening_connections if conn[3].strip().isdigit()
             ], 3, 1, max_x - 2, listen_start_idx, max_lines, active_section == "LISTEN")
         elif selected_option == 3:
             draw_table(buffer, "Established Connections", [
                 conn + [format_size(io_data.get(int(conn[3].strip()), {}).get('sent', 0)), format_size(io_data.get(int(conn[3].strip()), {}).get('recv', 0))]
-                for conn in established_connections
+                for conn in established_connections if conn[3].strip().isdigit()
             ], 3, 1, max_x - 2, est_start_idx, max_lines // 2, active_section == "ESTABLISHED")
             draw_table(buffer, "Listening Connections", [
                 conn + [format_size(io_data.get(int(conn[3].strip()), {}).get('sent', 0)), format_size(io_data.get(int(conn[3].strip()), {}).get('recv', 0))]
-                for conn in listening_connections
+                for conn in listening_connections if conn[3].strip().isdigit()
             ], max_lines // 2 + 6, 1, max_x - 2, listen_start_idx, max_lines // 2, active_section == "LISTEN")
         elif selected_option == 4:
-            draw_process_table(buffer, "Running Processes", processes, 3, 1, max_x - 2, proc_start_idx, max_lines, proc_selected_idx)
+            draw_process_table(buffer, "Running Processes", processes, 3, 1, proc_start_idx, max_lines, proc_selected_idx)
             buffer.addstr(max_y - 2, 2, "Press 'k' to kill the selected process", curses.color_pair(2) | curses.A_BOLD)
 
         buffer.refresh(0, 0, 0, 0, max_y - 1, max_x - 1)
