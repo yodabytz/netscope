@@ -167,15 +167,16 @@ def splash_screen(stdscr, selected=0):
     while True:
         key = stdscr.getch()
         if key in [curses.KEY_ENTER, ord('\n')]:
-            return selected + 1
+            return selected  # Return only the selected option index
         elif key == curses.KEY_UP:
             selected = (selected - 1) % len(options)
         elif key == curses.KEY_DOWN:
             selected = (selected + 1) % len(options)
         elif key in [ord('1'), ord('2'), ord('3'), ord('4'), ord('5')]:
-            return int(chr(key))
+            selected = int(chr(key)) - 1
+            return selected
         elif key == ord('q'):
-            return 5  # To quit the program
+            return 4  # Return the index for the "Exit" option
 
         for idx, option in enumerate(options):
             option_x = max_x // 2 - len(option) // 2
@@ -249,17 +250,17 @@ def main_screen(stdscr, selected_option):
         buffer.addstr(0, 2, "NetScope 2.0", curses.color_pair(2) | curses.A_BOLD)
         buffer.addstr(1, 2, "Written by Yodabytz", curses.color_pair(2))
 
-        if selected_option == 1:
+        if selected_option == 0:
             draw_table(buffer, "Established Connections", [
                 conn + [format_size(io_data.get(int(conn[3].strip()), {}).get('sent', 0)), format_size(io_data.get(int(conn[3].strip()), {}).get('recv', 0))]
                 for conn in established_connections if conn[3].strip().isdigit()
             ], 3, 1, max_x - 2, est_start_idx, max_lines, active_section == "ESTABLISHED")
-        elif selected_option == 2:
+        elif selected_option == 1:
             draw_table(buffer, "Listening Connections", [
                 conn + [format_size(io_data.get(int(conn[3].strip()), {}).get('sent', 0)), format_size(io_data.get(int(conn[3].strip()), {}).get('recv', 0))]
                 for conn in listening_connections if conn[3].strip().isdigit()
             ], 3, 1, max_x - 2, listen_start_idx, max_lines, active_section == "LISTEN")
-        elif selected_option == 3:
+        elif selected_option == 2:
             draw_table(buffer, "Established Connections", [
                 conn + [format_size(io_data.get(int(conn[3].strip()), {}).get('sent', 0)), format_size(io_data.get(int(conn[3].strip()), {}).get('recv', 0))]
                 for conn in established_connections if conn[3].strip().isdigit()
@@ -268,7 +269,7 @@ def main_screen(stdscr, selected_option):
                 conn + [format_size(io_data.get(int(conn[3].strip()), {}).get('sent', 0)), format_size(io_data.get(int(conn[3].strip()), {}).get('recv', 0))]
                 for conn in listening_connections if conn[3].strip().isdigit()
             ], max_lines // 2 + 6, 1, max_x - 2, listen_start_idx, max_lines // 2, active_section == "LISTEN")
-        elif selected_option == 4:
+        elif selected_option == 3:
             draw_process_table(buffer, "Running Processes", processes, 3, 1, proc_start_idx, max_lines, proc_selected_idx)
             buffer.addstr(max_y - 2, 2, "Press 'k' to kill the selected process", curses.color_pair(2) | curses.A_BOLD)
 
@@ -276,12 +277,12 @@ def main_screen(stdscr, selected_option):
 
     while True:
         try:
-            if selected_option == 5:
+            if selected_option == 4:
                 break
 
-            if selected_option in [1, 2, 3]:
+            if selected_option in [0, 1, 2]:
                 established_connections, listening_connections = fetch_connections()
-            if selected_option == 4:
+            if selected_option == 3:
                 processes = fetch_processes()
 
             update_display(established_connections, listening_connections, processes)
@@ -291,25 +292,25 @@ def main_screen(stdscr, selected_option):
             max_lines = max_y - 8
 
             key = stdscr.getch()
-            if selected_option == 1:
+            if selected_option == 0:
                 if key == curses.KEY_UP:
                     est_start_idx = max(est_start_idx - 1, 0)
                 elif key == curses.KEY_DOWN:
                     est_start_idx = min(est_start_idx + 1, len(established_connections) - max_lines)
                 elif key == ord('q'):
-                    return 5, selected_option  # To quit the program
+                    return 4  # To quit the program
                 elif key in [curses.KEY_BACKSPACE, curses.KEY_LEFT, 127]:
-                    return 0, selected_option  # Navigate back to the main menu
-            elif selected_option == 2:
+                    return selected_option  # Navigate back to the main menu
+            elif selected_option == 1:
                 if key == curses.KEY_UP:
                     listen_start_idx = max(listen_start_idx - 1, 0)
                 elif key == curses.KEY_DOWN:
                     listen_start_idx = min(listen_start_idx + 1, len(listening_connections) - max_lines)
                 elif key == ord('q'):
-                    return 5, selected_option  # To quit the program
+                    return 4  # To quit the program
                 elif key in [curses.KEY_BACKSPACE, curses.KEY_LEFT, 127]:
-                    return 0, selected_option  # Navigate back to the main menu
-            elif selected_option == 4:
+                    return selected_option  # Navigate back to the main menu
+            elif selected_option == 3:
                 if key == curses.KEY_UP:
                     proc_selected_idx = max(proc_selected_idx - 1, 0)
                     if proc_selected_idx < proc_start_idx:
@@ -325,19 +326,19 @@ def main_screen(stdscr, selected_option):
                     except (psutil.NoSuchProcess, psutil.AccessDenied):
                         pass
                 elif key == ord('q'):
-                    return 5, selected_option  # To quit the program
+                    return 4  # To quit the program
                 elif key in [curses.KEY_BACKSPACE, curses.KEY_LEFT, 127]:
-                    return 0, selected_option  # Navigate back to the main menu
-            elif selected_option == 3:
+                    return selected_option  # Navigate back to the main menu
+            elif selected_option == 2:
                 if active_section == "ESTABLISHED":
                     if key == curses.KEY_UP:
                         est_start_idx = max(est_start_idx - 1, 0)
                     elif key == curses.KEY_DOWN:
                         est_start_idx = min(est_start_idx + 1, len(established_connections) - max_lines // 2)
                     elif key == ord('q'):
-                        return 5, selected_option  # To quit the program
+                        return 4  # To quit the program
                     elif key in [curses.KEY_BACKSPACE, curses.KEY_LEFT, 127]:
-                        return 0, selected_option  # Navigate back to the main menu
+                        return selected_option  # Navigate back to the main menu
                     elif key == ord('\t'):
                         active_section = "LISTEN"
                 elif active_section == "LISTEN":
@@ -346,15 +347,15 @@ def main_screen(stdscr, selected_option):
                     elif key == curses.KEY_DOWN:
                         listen_start_idx = min(listen_start_idx + 1, len(listening_connections) - max_lines // 2)
                     elif key == ord('q'):
-                        return 5, selected_option  # To quit the program
+                        return 4  # To quit the program
                     elif key in [curses.KEY_BACKSPACE, curses.KEY_LEFT, 127]:
-                        return 0, selected_option  # Navigate back to the main menu
+                        return selected_option  # Navigate back to the main menu
                     elif key == ord('\t'):
                         active_section = "ESTABLISHED"
             elif key in [curses.KEY_BACKSPACE, curses.KEY_LEFT, 127]:
-                return 0, selected_option  # Navigate back to the main menu
+                return selected_option  # Navigate back to the main menu
             elif key == ord('q'):
-                return 5, selected_option  # To quit the program
+                return 4  # To quit the program
         except curses.error:
             pass
         except Exception as e:
@@ -366,14 +367,9 @@ def main(stdscr):
     selected_option = 0
     while True:
         selected_option = splash_screen(stdscr, selected_option)
-        if selected_option == 5:
+        if selected_option == 4:
             break
-        result = main_screen(stdscr, selected_option)
-        if isinstance(result, tuple):
-            if result[0] == 0:
-                selected_option = result[1]
-            elif result[0] == 5:
-                break
+        selected_option = main_screen(stdscr, selected_option)
 
 if __name__ == "__main__":
     os.environ.setdefault('ESCDELAY', '25')
