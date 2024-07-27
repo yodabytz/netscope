@@ -5,6 +5,46 @@ import curses
 import time
 import os
 import platform
+import re
+import sys
+import argparse
+
+def show_help():
+    help_text = """
+    NetScope 2.0r2 - Network and Process Monitoring Tool
+
+    Usage: netscope [options]
+
+    Options:
+    -d <seconds>    Set the update interval in seconds (default is 3 seconds)
+    -h              Show this help message
+
+    Controls:
+    Menu Navigation:
+    Up/Down Arrows or k/j: Navigate through the menu options.
+    Enter or Return: Select a menu option.
+    q: Quit the application from any screen.
+
+    Established and Listening Connections Screens:
+    Up/Down Arrows or k/j: Scroll through the list of connections.
+    Left Arrow or Backspace: Return to the main menu.
+    q: Quit the application.
+
+    Both Connections Screen:
+    Tab: Switch between Established and Listening sections.
+    Up/Down Arrows or k/j: Scroll through the connections in the active section.
+    Left Arrow or Backspace: Return to the main menu.
+    q: Quit the application.
+
+    Running Processes Screen:
+    Up/Down Arrows or k/j: Scroll through the list of processes.
+    k: Kill the selected process.
+    s: Search for a process.
+    n: Find next match in search.
+    Left Arrow or Backspace: Return to the main menu.
+    q: Quit the application.
+    """
+    print(help_text)
 
 def get_process_name(pid):
     try:
@@ -187,7 +227,49 @@ def splash_screen(stdscr, selected=0):
 
         stdscr.refresh()
 
-def main_screen(stdscr, selected_option):
+def search_process(stdscr, processes, last_search_term=None, last_match_index=-1):
+    curses.echo()
+    max_y, max_x = stdscr.getmaxyx()
+    search_win = curses.newwin(3, max_x - 4, max_y // 2 - 1, 2)
+    search_win.bkgd(curses.color_pair(1))
+    search_win.border(0)
+    search_win.addstr(1, 2, "Search Process (use * for wildcard): ", curses.color_pair(2) | curses.A_BOLD)
+    stdscr.refresh()
+    search_win.refresh()
+    if last_search_term is None:
+        search_term = search_win.getstr(1, 38).decode('utf-8')  # Updated to start after space
+    else:
+        search_win.addstr(1, 38, last_search_term)
+        search_win.refresh()
+        search_term = last_search_term
+    curses.noecho()
+
+    matches = []
+    if "*" in search_term:
+        pattern = re.compile(re.escape(search_term).replace(r'\*', '.*'), re.IGNORECASE)
+        matches = [idx for idx, proc in enumerate(processes) if pattern.search(proc[10].strip())]
+    else:
+        matches = [idx for idx, proc in enumerate(processes) if proc[10].strip().lower() == search_term.lower()]
+
+    if not matches:
+        search_win.addstr(1, 38 + len(search_term), " - App Not Found", curses.color_pair(2))
+        search_win.refresh()
+        time.sleep(1)
+        return -1, search_term
+
+    if last_match_index >= 0 and last_match_index in matches:
+        next_match_index = matches.index(last_match_index) + 1
+        if next_match_index < len(matches):
+            return matches[next_match_index], search_term
+        else:
+            search_win.addstr(1, 38 + len(search_term), " - Starting from beginning", curses.color_pair(2))
+            search_win.refresh()
+            time.sleep(1)
+            return matches[0], search_term
+    else:
+        return matches[0], search_term
+
+def main_screen(stdscr, selected_option, update_interval):
     curses.start_color()
     curses.init_pair(1, curses.COLOR_WHITE, curses.COLOR_BLUE)
     curses.init_pair(2, curses.COLOR_YELLOW, curses.COLOR_BLUE)
@@ -199,11 +281,12 @@ def main_screen(stdscr, selected_option):
     proc_start_idx = 0
     proc_selected_idx = 0
     active_section = "ESTABLISHED"
-    stdscr.timeout(1000)  # Increase timeout to reduce CPU usage
+    stdscr.timeout(update_interval * 1000)  # Set timeout based on update_interval
 
     established_connections = []
     listening_connections = []
     processes = []
+    search_term = None
 
     # Adjusted minimum width for Both screen
     min_width = 135
@@ -271,7 +354,7 @@ def main_screen(stdscr, selected_option):
             ], max_lines // 2 + 6, 1, max_x - 2, listen_start_idx, max_lines // 2, active_section == "LISTEN")
         elif selected_option == 3:
             draw_process_table(buffer, "Running Processes", processes, 3, 1, proc_start_idx, max_lines, proc_selected_idx)
-            buffer.addstr(max_y - 2, 2, "Press 'k' to kill the selected process", curses.color_pair(2) | curses.A_BOLD)
+            buffer.addstr(max_y - 2, 2, "Press 'k' to kill the selected process | Press 's' to search for a process | Press 'n' to find next match", curses.color_pair(2) | curses.A_BOLD)
 
         buffer.refresh(0, 0, 0, 0, max_y - 1, max_x - 1)
 
@@ -325,6 +408,14 @@ def main_screen(stdscr, selected_option):
                         psutil.Process(pid).terminate()
                     except (psutil.NoSuchProcess, psutil.AccessDenied):
                         pass
+                elif key == ord('s'):
+                    proc_selected_idx, search_term = search_process(stdscr, processes)
+                    if proc_selected_idx != -1:
+                        proc_start_idx = max(0, proc_selected_idx - max_lines // 2)  # Center the found process in the view
+                elif key == ord('n') and search_term:
+                    proc_selected_idx, search_term = search_process(stdscr, processes, search_term, proc_selected_idx)
+                    if proc_selected_idx != -1:
+                        proc_start_idx = max(0, proc_selected_idx - max_lines // 2)  # Center the found process in the view
                 elif key == ord('q'):
                     return 4  # To quit the program
                 elif key in [curses.KEY_BACKSPACE, curses.KEY_LEFT, 127]:
@@ -363,14 +454,24 @@ def main_screen(stdscr, selected_option):
             stdscr.refresh()
             time.sleep(1)
 
-def main(stdscr):
+def main(stdscr, update_interval):
     selected_option = 0
     while True:
         selected_option = splash_screen(stdscr, selected_option)
         if selected_option == 4:
             break
-        selected_option = main_screen(stdscr, selected_option)
+        selected_option = main_screen(stdscr, selected_option, update_interval)
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="NetScope 2.0 - Network and Process Monitoring Tool", add_help=False)
+    parser.add_argument("-d", type=int, default=3, help="Set the update interval in seconds (default is 3 seconds)")
+    parser.add_argument("-h", action="store_true", help="Show this help message")
+
+    args = parser.parse_args()
+
+    if args.h:
+        show_help()
+        sys.exit(0)
+
     os.environ.setdefault('ESCDELAY', '25')
-    curses.wrapper(main)
+    curses.wrapper(main, args.d)
