@@ -1,4 +1,4 @@
-# NetScope 2.0r2 Beta (Testing)
+# NetScope 2.0r2
 
 NetScope is a powerful network and process monitoring tool inspired by `htop` and 'netstat`. It allows you to view established connections, listening connections, running processes, and interact with the processes, such as killing them. The tool is designed to be user-friendly and efficient, providing detailed information about your system's network and process activity. 
 
