@@ -7,17 +7,43 @@ import os
 import platform
 import re
 import sys
+import subprocess
 import argparse
+import socket
+
+# Constants
+VERSION = "2.0.04"
+
+# Load ASCII art for system info from a separate file
+ascii_art_path = '/etc/netscope/ascii_art.py'
+ascii_art_dict = {}
+if os.path.exists(ascii_art_path):
+    with open(ascii_art_path) as f:
+        exec(f.read(), globals())
+
+# Corrected NetScope ASCII art for the splash screen
+netscope_ascii_art = [
+    "ooooo      ooo               .    .oooooo..o                                          ",
+    "`888b.     `8'             .o8   d8P'    `Y8                                          ",
+    " 8 `88b.    8   .ooooo.  .o888oo Y88bo.       .ooooo.   .ooooo.  oo.ooooo.   .ooooo.  ",
+    " 8   `88b.  8  d88' `88b   888    `\"Y8888o.  d88' `\"Y8 d88' `88b  888' `88b d88' `88b ",
+    " 8     `88b.8  888ooo888   888        `\"Y88b 888       888   888  888   888 888ooo888 ",
+    " 8       `888  888    .o   888 . oo     .d8P 888   .o8 888   888  888   888 888    .o ",
+    "o8o        `8  `Y8bod8P'   \"888\" 8\"\"88888P'  `Y8bod8P' `Y8bod8P'  888bod8P' `Y8bod8P' ",
+    "                                                                  888                 ",
+    "                                                                 o888o                "
+]
 
 def show_help():
-    help_text = """
-    NetScope 2.0r2 - Network and Process Monitoring Tool
+    help_text = f"""
+    NetScope {VERSION} - Network and Process Monitoring Tool
 
     Usage: netscope [options]
 
     Options:
     -d <seconds>    Set the update interval in seconds (default is 3 seconds)
     -h              Show this help message
+    -v              Show version information
 
     Controls:
     Menu Navigation:
@@ -165,19 +191,8 @@ def splash_screen(stdscr, selected=0):
     stdscr.refresh()
 
     title = "NetScope 2.0"
-    ascii_art = [
-        "ooooo      ooo               .    .oooooo..o                                          ",
-        "`888b.     `8'             .o8   d8P'    `Y8                                          ",
-        " 8 `88b.    8   .ooooo.  .o888oo Y88bo.       .ooooo.   .ooooo.  oo.ooooo.   .ooooo.  ",
-        " 8   `88b.  8  d88' `88b   888    `\"Y8888o.  d88' `\"Y8 d88' `88b  888' `88b d88' `88b ",
-        " 8     `88b.8  888ooo888   888        `\"Y88b 888       888   888  888   888 888ooo888 ",
-        " 8       `888  888    .o   888 . oo     .d8P 888   .o8 888   888  888   888 888    .o ",
-        "o8o        `8  `Y8bod8P'   \"888\" 8\"\"88888P'  `Y8bod8P' `Y8bod8P'  888bod8P' `Y8bod8P' ",
-        "                                                                  888                 ",
-        "                                                                 o888o                "
-    ]
     prompt = "Select an option:"
-    options = ["1. Established Connections", "2. Listening Connections", "3. Both", "4. Running Processes", "5. Exit"]
+    options = ["1. System Info", "2. Established Connections", "3. Listening Connections", "4. Both", "5. Running Processes", "6. Exit"]
     title_x = max_x // 2 - len(title) // 2
     ascii_start_y = max_y // 4
     options_y_start = max_y // 2 + 4
@@ -185,7 +200,7 @@ def splash_screen(stdscr, selected=0):
     prompt_y = options_y_start - 2
 
     stdscr.addstr(1, title_x, title, curses.color_pair(2) | curses.A_BOLD)
-    for i, line in enumerate(ascii_art):
+    for i, line in enumerate(netscope_ascii_art):
         stdscr.addstr(ascii_start_y + i, (max_x - len(line)) // 2, line, curses.color_pair(2) | curses.A_BOLD)
 
     stdscr.addstr(prompt_y, prompt_x, prompt, curses.color_pair(2))
@@ -212,11 +227,11 @@ def splash_screen(stdscr, selected=0):
             selected = (selected - 1) % len(options)
         elif key == curses.KEY_DOWN:
             selected = (selected + 1) % len(options)
-        elif key in [ord('1'), ord('2'), ord('3'), ord('4'), ord('5')]:
+        elif key in [ord('1'), ord('2'), ord('3'), ord('4'), ord('5'), ord('6')]:
             selected = int(chr(key)) - 1
             return selected
         elif key == ord('q'):
-            return 4  # Return the index for the "Exit" option
+            return 5  # Return the index for the "Exit" option
 
         for idx, option in enumerate(options):
             option_x = max_x // 2 - len(option) // 2
@@ -226,6 +241,194 @@ def splash_screen(stdscr, selected=0):
                 stdscr.addstr(options_y_start + idx, option_x, option, curses.color_pair(2))
 
         stdscr.refresh()
+
+def draw_system_info(window):
+    # Determine if we are on macOS
+    is_macos = platform.system() == "Darwin"
+
+    # System info details
+    if is_macos:
+        os_name = "macOS"
+        os_version = platform.mac_ver()[0]
+    else:
+        os_name = platform.system()
+        os_version = platform.release()
+
+    # Package counts
+    packages_dpkg = 0
+    if not is_macos:
+        try:
+            packages_dpkg = len(subprocess.check_output(['dpkg-query', '-f', '${binary:Package}\n', '-W']).decode('utf-8').splitlines())
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            packages_dpkg = 0
+
+    try:
+        # If sqlite3 fails, fallback to counting installed formulae directly from Homebrew directories
+        brew_prefix = subprocess.check_output(['brew', '--prefix'], text=True).strip()
+        brew_formulae_dir = os.path.join(brew_prefix, 'Cellar')
+        packages_brew = len(os.listdir(brew_formulae_dir))
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        packages_brew = 0
+
+    # GPU information
+    if is_macos:
+        try:
+            gpu_info_raw = subprocess.check_output("system_profiler SPDisplaysDataType", shell=True).decode('utf-8').strip().split('\n')
+            # Extract the GPU information based on the typical output structure
+            gpu_info = [line.split(': ', 1)[1] for line in gpu_info_raw if 'Chipset Model' in line or 'Vendor' in line]
+            gpu_text = ', '.join(gpu_info)
+        except subprocess.CalledProcessError:
+            gpu_text = "N/A"
+    else:
+        try:
+            gpu_info_raw = subprocess.check_output("lspci | grep -i 'vga\\|3d\\|2d'", shell=True).decode('utf-8').strip().split('\n')
+            gpu_info = [line.split(':', 2)[-1].strip() for line in gpu_info_raw]  # Extracting relevant part of GPU info
+            gpu_text = gpu_info[0] if gpu_info else "N/A"
+        except subprocess.CalledProcessError:
+            gpu_text = "N/A"
+
+    # Truncate GPU info to a maximum of 55 characters
+    gpu_text = gpu_text[:55]  # Ensure only up to 55 characters are displayed
+
+    # Get the current screen resolution
+    if is_macos:
+        try:
+            screen_info = subprocess.check_output("system_profiler SPDisplaysDataType | grep Resolution", shell=True).decode('utf-8').strip()
+            screen_resolution = re.search(r"Resolution: (\d+ x \d+)", screen_info).group(1)
+        except Exception:
+            screen_resolution = "N/A"
+    else:
+        try:
+            if os.getenv("DISPLAY"):
+                screen_info = subprocess.check_output("xdpyinfo | grep dimensions", shell=True).decode('utf-8').strip()
+                screen_resolution = re.search(r"dimensions:\s+(\d+x\d+)", screen_info).group(1)
+            else:
+                screen_resolution = "N/A"  # Suppress error if DISPLAY is not set
+        except Exception:
+            screen_resolution = "N/A"
+
+    # Get CPU information
+    if is_macos:
+        try:
+            cpu_info = subprocess.check_output("sysctl -n machdep.cpu.brand_string", shell=True).decode('utf-8').strip()
+        except subprocess.CalledProcessError:
+            cpu_info = "N/A"
+    else:
+        try:
+            cpu_info = subprocess.check_output("lscpu | grep 'Model name'", shell=True).decode('utf-8').split(':')[1].strip()
+        except subprocess.CalledProcessError:
+            cpu_info = "N/A"
+
+    # Get uptime
+    if is_macos:
+        try:
+            uptime_seconds = float(subprocess.check_output("sysctl -n kern.boottime | awk '{print $4}' | sed 's/,//'", shell=True))
+            uptime_str = time.strftime('%j days, %H hours, %M mins', time.gmtime(time.time() - uptime_seconds))
+        except Exception:
+            uptime_str = "N/A"
+    else:
+        try:
+            with open('/proc/uptime', 'r') as f:
+                uptime_seconds = float(f.readline().split()[0])
+                uptime_str = time.strftime('%j days, %H hours, %M mins', time.gmtime(uptime_seconds))
+        except Exception:
+            uptime_str = "N/A"
+
+    try:
+        shell_info = os.getenv("SHELL", "N/A").split('/')[-1]
+        shell_version = subprocess.check_output([shell_info, "--version"], text=True).strip().split('\n')[0]
+    except (subprocess.CalledProcessError, IndexError):
+        shell_version = "N/A"
+
+    try:
+        terminal = os.ttyname(sys.stdin.fileno())
+    except Exception:
+        terminal = "N/A"
+
+    memory = psutil.virtual_memory()
+    memory_used = format_size(memory.used)
+    memory_total = format_size(memory.total)
+
+    # Get swap information
+    swap = psutil.swap_memory()
+    swap_used = format_size(swap.used)
+    swap_total = format_size(swap.total)
+
+    # Get disk information
+    disk_usage = psutil.disk_usage('/')
+    disk_used = format_size(disk_usage.used)
+    disk_total = format_size(disk_usage.total)
+
+    # Get local IP address and its interface
+    local_ip = "N/A"
+    main_interface = "N/A"
+    try:
+        # Check for the active network interfaces
+        for interface, addrs in psutil.net_if_addrs().items():
+            for address in addrs:
+                if address.family == socket.AF_INET and not address.address.startswith("127."):
+                    local_ip = address.address
+                    main_interface = interface
+                    break
+            if local_ip != "N/A":
+                break
+    except KeyError:
+        pass
+
+    # Get locale
+    locale_info = subprocess.check_output("locale | grep LANG=", shell=True).decode('utf-8').strip().split('=')[-1]
+
+    # Select appropriate ASCII art for system
+    if platform.system() == "Linux":
+        try:
+            distro_name = subprocess.check_output(['lsb_release', '-si'], text=True).strip()
+            ascii_art = ascii_art_dict.get(distro_name, ascii_art_dict.get("Debian", ["Distro ASCII art not found."]))
+        except subprocess.CalledProcessError:
+            ascii_art = ascii_art_dict.get("Debian", ["Distro ASCII art not found."])
+    else:
+        ascii_art = ascii_art_dict.get(platform.system(), ["Distro ASCII art not found."])
+
+    system_info = [
+        ("OS:", f"{os_name} {os_version} {platform.machine()}"),
+        ("Host:", platform.node()),
+        ("Kernel:", platform.release()),
+        ("Uptime:", uptime_str),
+        ("Packages:", f"{packages_dpkg} (dpkg), {packages_brew} (brew)"),
+        ("Shell:", shell_version),
+        ("Resolution:", screen_resolution),
+        ("Terminal:", terminal),
+        ("CPU:", cpu_info),
+        ("GPU:", gpu_text),  # Truncated GPU info
+        ("Memory:", f"{memory_used} / {memory_total}"),
+        ("Swap:", f"{swap_used} / {swap_total}"),
+        ("Disk (/):", f"{disk_used} / {disk_total}"),
+        (f"Local IP ({main_interface}):", local_ip),
+        ("Locale:", locale_info),
+    ]
+
+    max_y, max_x = window.getmaxyx()
+    ascii_start_y = max_y // 4
+
+    # Align system info to the right of the ASCII art
+    ascii_art_width = max(len(line) for line in ascii_art)
+    info_start_x = ascii_art_width + 5  # Add slight margin between the separator and system info
+
+    for i, line in enumerate(ascii_art):
+        if i >= max_y - ascii_start_y - 1:
+            break
+        window.addstr(ascii_start_y + i, 2, line, curses.color_pair(2))
+
+    # Draw vertical line separator
+    separator_x = ascii_art_width + 3  # Separator is just to the right of the ASCII art
+    for i in range(ascii_start_y, ascii_start_y + len(ascii_art)):
+        window.addch(i, separator_x, '|', curses.color_pair(2))  # No bold
+
+    for i, (key, value) in enumerate(system_info):
+        if i >= max_y - ascii_start_y - 1:
+            break
+        if key:  # If there is a key, print it
+            window.addstr(ascii_start_y + i, info_start_x, f"{key:12} ", curses.color_pair(2) | curses.A_BOLD)
+        window.addstr(ascii_start_y + i, info_start_x + len(key) + 2 if key else info_start_x, value, curses.color_pair(1))
 
 def search_process(stdscr, processes, last_search_term=None, last_match_index=-1):
     curses.echo()
@@ -334,16 +537,18 @@ def main_screen(stdscr, selected_option, update_interval):
         buffer.addstr(1, 2, "Written by Yodabytz", curses.color_pair(2))
 
         if selected_option == 0:
+            draw_system_info(buffer)
+        elif selected_option == 1:
             draw_table(buffer, "Established Connections", [
                 conn + [format_size(io_data.get(int(conn[3].strip()), {}).get('sent', 0)), format_size(io_data.get(int(conn[3].strip()), {}).get('recv', 0))]
                 for conn in established_connections if conn[3].strip().isdigit()
             ], 3, 1, max_x - 2, est_start_idx, max_lines, active_section == "ESTABLISHED")
-        elif selected_option == 1:
+        elif selected_option == 2:
             draw_table(buffer, "Listening Connections", [
                 conn + [format_size(io_data.get(int(conn[3].strip()), {}).get('sent', 0)), format_size(io_data.get(int(conn[3].strip()), {}).get('recv', 0))]
                 for conn in listening_connections if conn[3].strip().isdigit()
             ], 3, 1, max_x - 2, listen_start_idx, max_lines, active_section == "LISTEN")
-        elif selected_option == 2:
+        elif selected_option == 3:
             draw_table(buffer, "Established Connections", [
                 conn + [format_size(io_data.get(int(conn[3].strip()), {}).get('sent', 0)), format_size(io_data.get(int(conn[3].strip()), {}).get('recv', 0))]
                 for conn in established_connections if conn[3].strip().isdigit()
@@ -352,7 +557,7 @@ def main_screen(stdscr, selected_option, update_interval):
                 conn + [format_size(io_data.get(int(conn[3].strip()), {}).get('sent', 0)), format_size(io_data.get(int(conn[3].strip()), {}).get('recv', 0))]
                 for conn in listening_connections if conn[3].strip().isdigit()
             ], max_lines // 2 + 6, 1, max_x - 2, listen_start_idx, max_lines // 2, active_section == "LISTEN")
-        elif selected_option == 3:
+        elif selected_option == 4:
             draw_process_table(buffer, "Running Processes", processes, 3, 1, proc_start_idx, max_lines, proc_selected_idx)
             buffer.addstr(max_y - 2, 2, "Press 'k' to kill the selected process | Press 's' to search for a process | Press 'n' to find next match", curses.color_pair(2) | curses.A_BOLD)
 
@@ -360,12 +565,12 @@ def main_screen(stdscr, selected_option, update_interval):
 
     while True:
         try:
-            if selected_option == 4:
+            if selected_option == 5:
                 break
 
-            if selected_option in [0, 1, 2]:
+            if selected_option in [1, 2, 3]:
                 established_connections, listening_connections = fetch_connections()
-            if selected_option == 3:
+            if selected_option == 4:
                 processes = fetch_processes()
 
             update_display(established_connections, listening_connections, processes)
@@ -375,25 +580,25 @@ def main_screen(stdscr, selected_option, update_interval):
             max_lines = max_y - 8
 
             key = stdscr.getch()
-            if selected_option == 0:
+            if selected_option == 1:
                 if key == curses.KEY_UP:
                     est_start_idx = max(est_start_idx - 1, 0)
                 elif key == curses.KEY_DOWN:
                     est_start_idx = min(est_start_idx + 1, len(established_connections) - max_lines)
                 elif key == ord('q'):
-                    return 4  # To quit the program
+                    return 5  # To quit the program
                 elif key in [curses.KEY_BACKSPACE, curses.KEY_LEFT, 127]:
                     return selected_option  # Navigate back to the main menu
-            elif selected_option == 1:
+            elif selected_option == 2:
                 if key == curses.KEY_UP:
                     listen_start_idx = max(listen_start_idx - 1, 0)
                 elif key == curses.KEY_DOWN:
                     listen_start_idx = min(listen_start_idx + 1, len(listening_connections) - max_lines)
                 elif key == ord('q'):
-                    return 4  # To quit the program
+                    return 5  # To quit the program
                 elif key in [curses.KEY_BACKSPACE, curses.KEY_LEFT, 127]:
                     return selected_option  # Navigate back to the main menu
-            elif selected_option == 3:
+            elif selected_option == 4:
                 if key == curses.KEY_UP:
                     proc_selected_idx = max(proc_selected_idx - 1, 0)
                     if proc_selected_idx < proc_start_idx:
@@ -417,17 +622,17 @@ def main_screen(stdscr, selected_option, update_interval):
                     if proc_selected_idx != -1:
                         proc_start_idx = max(0, proc_selected_idx - max_lines // 2)  # Center the found process in the view
                 elif key == ord('q'):
-                    return 4  # To quit the program
+                    return 5  # To quit the program
                 elif key in [curses.KEY_BACKSPACE, curses.KEY_LEFT, 127]:
                     return selected_option  # Navigate back to the main menu
-            elif selected_option == 2:
+            elif selected_option == 3:
                 if active_section == "ESTABLISHED":
                     if key == curses.KEY_UP:
                         est_start_idx = max(est_start_idx - 1, 0)
                     elif key == curses.KEY_DOWN:
                         est_start_idx = min(est_start_idx + 1, len(established_connections) - max_lines // 2)
                     elif key == ord('q'):
-                        return 4  # To quit the program
+                        return 5  # To quit the program
                     elif key in [curses.KEY_BACKSPACE, curses.KEY_LEFT, 127]:
                         return selected_option  # Navigate back to the main menu
                     elif key == ord('\t'):
@@ -438,7 +643,7 @@ def main_screen(stdscr, selected_option, update_interval):
                     elif key == curses.KEY_DOWN:
                         listen_start_idx = min(listen_start_idx + 1, len(listening_connections) - max_lines // 2)
                     elif key == ord('q'):
-                        return 4  # To quit the program
+                        return 5  # To quit the program
                     elif key in [curses.KEY_BACKSPACE, curses.KEY_LEFT, 127]:
                         return selected_option  # Navigate back to the main menu
                     elif key == ord('\t'):
@@ -446,7 +651,7 @@ def main_screen(stdscr, selected_option, update_interval):
             elif key in [curses.KEY_BACKSPACE, curses.KEY_LEFT, 127]:
                 return selected_option  # Navigate back to the main menu
             elif key == ord('q'):
-                return 4  # To quit the program
+                return 5  # To quit the program
         except curses.error:
             pass
         except Exception as e:
@@ -458,19 +663,24 @@ def main(stdscr, update_interval):
     selected_option = 0
     while True:
         selected_option = splash_screen(stdscr, selected_option)
-        if selected_option == 4:
+        if selected_option == 5:
             break
         selected_option = main_screen(stdscr, selected_option, update_interval)
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="NetScope 2.0 - Network and Process Monitoring Tool", add_help=False)
+    parser = argparse.ArgumentParser(description=f"NetScope {VERSION} - Network and Process Monitoring Tool", add_help=False)
     parser.add_argument("-d", type=int, default=3, help="Set the update interval in seconds (default is 3 seconds)")
     parser.add_argument("-h", action="store_true", help="Show this help message")
+    parser.add_argument("-v", action="store_true", help="Show version information")
 
     args = parser.parse_args()
 
     if args.h:
         show_help()
+        sys.exit(0)
+
+    if args.v:
+        print(f"NetScope {VERSION}")
         sys.exit(0)
 
     os.environ.setdefault('ESCDELAY', '25')
