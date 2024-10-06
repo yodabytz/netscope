@@ -12,7 +12,7 @@ import argparse
 import socket
 
 # Constants
-VERSION = "2.0.04"
+VERSION = "2.0.07"
 
 # Load ASCII art for system info from a separate file
 ascii_art_path = '/etc/netscope/ascii_art.py'
@@ -59,14 +59,18 @@ def show_help():
     Both Connections Screen:
     Tab: Switch between Established and Listening sections.
     Up/Down Arrows or k/j: Scroll through the connections in the active section.
+    ?: Show this help menu.
     Left Arrow or Backspace: Return to the main menu.
     q: Quit the application.
 
     Running Processes Screen:
     Up/Down Arrows or k/j: Scroll through the list of processes.
-    k: Kill the selected process.
+    k: Kill the selected process (with confirmation).
     s: Search for a process.
     n: Find next match in search.
+    c: Sort processes by CPU usage.
+    m: Sort processes by Memory usage.
+    ?: Show this help menu.
     Left Arrow or Backspace: Return to the main menu.
     q: Quit the application.
     """
@@ -472,6 +476,51 @@ def search_process(stdscr, processes, last_search_term=None, last_match_index=-1
     else:
         return matches[0], search_term
 
+def show_help_popup(stdscr, help_lines):
+    height, width = stdscr.getmaxyx()
+    # Calculate popup dimensions
+    popup_height = len(help_lines) + 4  # extra space for border
+    popup_width = max(len(line) for line in help_lines) + 4
+    popup_y = (height - popup_height) // 2
+    popup_x = (width - popup_width) // 2
+    # Create a new window for the help popup
+    help_win = curses.newwin(popup_height, popup_width, popup_y, popup_x)
+    help_win.bkgd(curses.color_pair(1))
+    help_win.border()
+    # Add help text to the popup window
+    for idx, line in enumerate(help_lines):
+        help_win.addstr(idx + 1, 2, line, curses.color_pair(2))
+    help_win.refresh()
+    help_win.getch()
+    help_win.clear()
+    stdscr.refresh()
+
+def confirm_kill_process(stdscr, process_name, pid):
+    height, width = stdscr.getmaxyx()
+    prompt = f"Are you sure you want to kill {process_name} (PID {pid})? (y/n)"
+    prompt_width = len(prompt) + 4
+    prompt_height = 5
+    prompt_y = (height - prompt_height) // 2
+    prompt_x = (width - prompt_width) // 2
+
+    # Create a new window for the confirmation prompt
+    confirm_win = curses.newwin(prompt_height, prompt_width, prompt_y, prompt_x)
+    confirm_win.bkgd(curses.color_pair(1))
+    confirm_win.border()
+    confirm_win.addstr(2, 2, prompt, curses.color_pair(2))
+    confirm_win.refresh()
+
+    while True:
+        key = confirm_win.getch()
+        if key in [ord('y'), ord('Y')]:
+            confirm_win.clear()
+            confirm_win.refresh()
+            return True
+        elif key in [ord('n'), ord('N'), 27]:  # 27 is ESC key
+            confirm_win.clear()
+            confirm_win.refresh()
+            return False
+
 def main_screen(stdscr, selected_option, update_interval):
     curses.start_color()
     curses.init_pair(1, curses.COLOR_WHITE, curses.COLOR_BLUE)
@@ -494,11 +543,17 @@ def main_screen(stdscr, selected_option, update_interval):
     # Adjusted minimum width for Both screen
     min_width = 135
 
+    cpu_percent_index = 7
+    memory_percent_index = 8
+    sort_key_index = cpu_percent_index  # Default to sort by CPU usage
+
     def fetch_connections():
         return get_connections('ESTABLISHED'), get_connections('LISTEN')
 
     def fetch_processes():
-        return get_all_processes()
+        processes = get_all_processes()
+        processes.sort(key=lambda x: float(x[sort_key_index].strip()), reverse=True)
+        return processes
 
     def update_display(established_connections, listening_connections, processes):
         max_y, max_x = stdscr.getmaxyx()
@@ -557,9 +612,10 @@ def main_screen(stdscr, selected_option, update_interval):
                 conn + [format_size(io_data.get(int(conn[3].strip()), {}).get('sent', 0)), format_size(io_data.get(int(conn[3].strip()), {}).get('recv', 0))]
                 for conn in listening_connections if conn[3].strip().isdigit()
             ], max_lines // 2 + 6, 1, max_x - 2, listen_start_idx, max_lines // 2, active_section == "LISTEN")
+            # No helpline at the bottom
         elif selected_option == 4:
             draw_process_table(buffer, "Running Processes", processes, 3, 1, proc_start_idx, max_lines, proc_selected_idx)
-            buffer.addstr(max_y - 2, 2, "Press 'k' to kill the selected process | Press 's' to search for a process | Press 'n' to find next match", curses.color_pair(2) | curses.A_BOLD)
+            # Removed helpline at the bottom
 
         buffer.refresh(0, 0, 0, 0, max_y - 1, max_x - 1)
 
@@ -608,11 +664,14 @@ def main_screen(stdscr, selected_option, update_interval):
                     if proc_selected_idx >= proc_start_idx + max_lines:
                         proc_start_idx = proc_selected_idx - max_lines + 1
                 elif key == ord('k'):
-                    try:
-                        pid = int(processes[proc_selected_idx][0].strip())
-                        psutil.Process(pid).terminate()
-                    except (psutil.NoSuchProcess, psutil.AccessDenied):
-                        pass
+                    pid = int(processes[proc_selected_idx][0].strip())
+                    process_name = processes[proc_selected_idx][10].strip()
+                    confirmed = confirm_kill_process(stdscr, process_name, pid)
+                    if confirmed:
+                        try:
+                            psutil.Process(pid).terminate()
+                        except (psutil.NoSuchProcess, psutil.AccessDenied):
+                            pass
                 elif key == ord('s'):
                     proc_selected_idx, search_term = search_process(stdscr, processes)
                     if proc_selected_idx != -1:
@@ -621,6 +680,27 @@ def main_screen(stdscr, selected_option, update_interval):
                     proc_selected_idx, search_term = search_process(stdscr, processes, search_term, proc_selected_idx)
                     if proc_selected_idx != -1:
                         proc_start_idx = max(0, proc_selected_idx - max_lines // 2)  # Center the found process in the view
+                elif key == ord('m'):
+                    sort_key_index = memory_percent_index
+                elif key == ord('c'):
+                    sort_key_index = cpu_percent_index
+                elif key == ord('?'):
+                    # Help text specific to the Running Processes screen
+                    help_lines = [
+                        " Running Processes Screen Help ",
+                        "",
+                        " Key Bindings:",
+                        " Up/Down Arrows or k/j: Scroll through the list of processes.",
+                        " k - Kill the selected process (with confirmation)",
+                        " s - Search for a process",
+                        " n - Find next match in search",
+                        " c - Sort processes by CPU usage",
+                        " m - Sort processes by Memory usage",
+                        " ? - Show this help menu",
+                        " Left Arrow or Backspace: Return to the main menu",
+                        " q - Quit the application",
+                    ]
+                    show_help_popup(stdscr, help_lines)
                 elif key == ord('q'):
                     return 5  # To quit the program
                 elif key in [curses.KEY_BACKSPACE, curses.KEY_LEFT, 127]:
@@ -631,23 +711,49 @@ def main_screen(stdscr, selected_option, update_interval):
                         est_start_idx = max(est_start_idx - 1, 0)
                     elif key == curses.KEY_DOWN:
                         est_start_idx = min(est_start_idx + 1, len(established_connections) - max_lines // 2)
+                    elif key == ord('\t'):
+                        active_section = "LISTEN"
+                    elif key == ord('?'):
+                        # Help text specific to the 'Both' screen
+                        help_lines = [
+                            " Both Connections Screen Help ",
+                            "",
+                            " Key Bindings:",
+                            " Tab: Switch between Established and Listening sections",
+                            " Up/Down Arrows or k/j: Scroll through the connections in the active section",
+                            " ? - Show this help menu",
+                            " Left Arrow or Backspace: Return to the main menu",
+                            " q - Quit the application",
+                        ]
+                        show_help_popup(stdscr, help_lines)
                     elif key == ord('q'):
                         return 5  # To quit the program
                     elif key in [curses.KEY_BACKSPACE, curses.KEY_LEFT, 127]:
                         return selected_option  # Navigate back to the main menu
-                    elif key == ord('\t'):
-                        active_section = "LISTEN"
                 elif active_section == "LISTEN":
                     if key == curses.KEY_UP:
                         listen_start_idx = max(listen_start_idx - 1, 0)
                     elif key == curses.KEY_DOWN:
                         listen_start_idx = min(listen_start_idx + 1, len(listening_connections) - max_lines // 2)
+                    elif key == ord('\t'):
+                        active_section = "ESTABLISHED"
+                    elif key == ord('?'):
+                        # Help text specific to the 'Both' screen
+                        help_lines = [
+                            " Both Connections Screen Help ",
+                            "",
+                            " Key Bindings:",
+                            " Tab: Switch between Established and Listening sections",
+                            " Up/Down Arrows or k/j: Scroll through the connections in the active section",
+                            " ? - Show this help menu",
+                            " Left Arrow or Backspace: Return to the main menu",
+                            " q - Quit the application",
+                        ]
+                        show_help_popup(stdscr, help_lines)
                     elif key == ord('q'):
                         return 5  # To quit the program
                     elif key in [curses.KEY_BACKSPACE, curses.KEY_LEFT, 127]:
                         return selected_option  # Navigate back to the main menu
-                    elif key == ord('\t'):
-                        active_section = "ESTABLISHED"
             elif key in [curses.KEY_BACKSPACE, curses.KEY_LEFT, 127]:
                 return selected_option  # Navigate back to the main menu
             elif key == ord('q'):
