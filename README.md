@@ -1,18 +1,21 @@
-# NetScope 2.0.04
+# NetScope 2.0.07
 
-NetScope is a powerful network and process monitoring tool inspired by `htop` and `netstat`. It allows you to view established connections, listening connections, running processes, and interact with the processes, such as killing them. The tool is designed to be user-friendly and efficient, providing detailed information about your system's network and process activity.
+NetScope is a powerful network and process monitoring tool inspired by `htop` and `netstat`. It allows you to view established connections, listening connections, running processes, and interact with the processes. The tool is designed to be user-friendly and efficient, providing detailed information about your system's network and process activity.
 
 ## Features
 
 - **Established Connections**: View all established network connections.
 - **Listening Connections**: View all listening network connections.
-- **Both**: View both established and listening connections side-by-side.
-- **Running Processes**: View and interact with running processes. Highlight and kill processes using simple keyboard controls.
-- **Process Search**: Press 's' to search for running processes using wildcards, and 'n' to navigate to the next match.
-- **Smooth Scrolling**: Efficient and smooth scrolling through lists of connections and processes.
+- **Both Connections View**: View both established and listening connections side-by-side.
+- **Running Processes**: View and interact with running processes. Highlight processes and perform actions using simple keyboard controls.
+- **Process Search**: Press `'s'` to search for running processes using wildcards, and `'n'` to navigate to the next match.
+- **Process Sorting**: Sort processes by CPU usage (`'c'`) or memory usage (`'m'`).
+- **Kill Processes with Confirmation**: Press `'k'` to kill the selected process with a confirmation prompt to prevent accidental termination.
+- **Help Menus**: Press `'?'` to display context-specific help menus with key bindings and navigation instructions.
 - **Interactive Commands**: Navigate and interact with the application using intuitive keyboard commands.
-- **Mac OSX Support**: This latest version now has Mac OSX support but needs sudo (Tested on Intel Chip).
-- **Enhanced System Info**: Displays detailed system information including OS, Host, Kernel, Uptime, Packages, Shell, Resolution, Terminal, CPU, GPU, and Memory.
+- **Smooth Scrolling**: Efficient and smooth scrolling through lists of connections and processes.
+- **Mac OS X Support**: Now supports Mac OS X (tested on Intel chips). Requires `sudo` privileges.
+- **Enhanced System Info**: Displays detailed system information including OS, Host, Kernel, Uptime, Packages, Shell, Resolution, Terminal, CPU, GPU, Memory, Swap, Disk Usage, Local IP, and Locale.
 
 ## Requirements
 
@@ -22,9 +25,11 @@ NetScope is a powerful network and process monitoring tool inspired by `htop` an
 
 ## Screenshot
 
-![NetScope 1.0](https://raw.githubusercontent.com/yodabytz/NetScope-2.0-Beta/main/Screen_Shot.png?raw=true)
+*Note: The screenshot may not reflect the latest features. Please refer to the application for the most up-to-date interface.*
 
-### Installation Steps
+![NetScope](https://raw.githubusercontent.com/yodabytz/NetScope-2.0-Beta/main/Screen_Shot.png?raw=true)
+
+## Installation Steps
 
 1. **Clone the Repository**:
     ```sh
@@ -43,55 +48,70 @@ NetScope is a powerful network and process monitoring tool inspired by `htop` an
     sudo cp ascii_art.py /etc/netscope/
     ```
 
-4. **Move the Script to /usr/bin**:
+4. **Move the Script to `/usr/bin`**:
     ```sh
     sudo cp netscope.py /usr/bin/netscope
     sudo chmod +x /usr/bin/netscope
-    For Mac OSX, put in /user/local/bin
     ```
+    *For Mac OS X, place the script in `/usr/local/bin` instead.*
 
-## Usage:
+## Usage
 
 Run the tool by typing:
 ```sh
 netscope
-netscope -d <seconds>
-netscope -h
-netscope -v
+
+# Optional arguments:
+
+-d <seconds>: Set the update interval in seconds (default is 3 seconds).
+-h: Show the help message with usage instructions.
+-v: Show version information.
+
+Examples:
+netscope -d 5   # Update every 5 seconds
+netscope -h     # Display help message
+netscope -v     # Display version information
 ```
 
-## Controls:
-```- Up/Down Arrows or k/j: Navigate through the menu options.
-- Enter or Return: Select a menu option.
-- q: Quit the application from any screen.
+## Controls
+# General Navigation
+```
+Up/Down Arrows or k/j: Navigate through lists and menu options.
+Enter or Return: Select a menu option.
+Left Arrow or Backspace: Return to the main menu from sub-screens.
+q: Quit the application from any screen.
+?: Show context-specific help menus with key bindings and instructions.
 
-Established and Listening Connections Screens:
+Established and Listening Connections Screens
+Up/Down Arrows or k/j: Scroll through the list of connections.
+Left Arrow or Backspace: Return to the main menu.
+q: Quit the application.
 
-- Up/Down Arrows or k/j: Scroll through the list of connections.
-- Left Arrow or Backspace: Return to the main menu.
-- q: Quit the application.
+Both Connections Screen
+Tab: Switch between Established and Listening sections.
+Up/Down Arrows or k/j: Scroll through the connections in the active section.
+Left Arrow or Backspace: Return to the main menu.
+?: Show help menu with key bindings.
+q: Quit the application.
 
-Both Connections Screen:
-
-- Tab: Switch between Established and Listening sections.
-- Up/Down Arrows or k/j: Scroll through the connections in the active section.
-- Left Arrow or Backspace: Return to the main menu.
-- q: Quit the application.
-
-Running Processes Screen:
-
-- Up/Down Arrows or k/j: Scroll through the list of processes.
-- k: Kill the selected process.
-- s: Search for a process using wildcards.
-- n: Find the next match for the search term.
-- Left Arrow or Backspace: Return to the main menu.
-- q: Quit the application.
+Running Processes Screen
+Up/Down Arrows or k/j: Scroll through the list of processes.
+k: Kill the selected process (with confirmation prompt).
+s: Search for a process using wildcards (e.g., *python*).
+n: Find the next match for the search term.
+c: Sort processes by CPU usage (descending).
+m: Sort processes by Memory usage (descending).
+Left Arrow or Backspace: Return to the main menu.
+?: Show help menu with key bindings.
+q: Quit the application.
 ```
 
-## License:
+## License
 This project is licensed under the MIT License. See the LICENSE file for details.
 
-## Author:
-NetScope 2.0 is developed by Yodabytz. 
+Author
+NetScope 2.0 is developed by Yodabytz.
 
-Contributions and feedback are welcome!
+Contributions, issues, and feedback are welcome!
+
+
