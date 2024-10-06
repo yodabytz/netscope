@@ -12,7 +12,7 @@ import argparse
 import socket
 
 # Constants
-VERSION = "2.0.07"
+VERSION = "2.0.04"
 
 # Load ASCII art for system info from a separate file
 ascii_art_path = '/etc/netscope/ascii_art.py'
@@ -119,8 +119,16 @@ def get_all_processes():
             user = (proc.info['username'][:15] if proc.info['username'] else "N/A").ljust(15)  # Limit the user name length to 15 characters
             nice = str(proc.info['nice']).ljust(5) if proc.info['nice'] is not None else "N/A".ljust(5)
             memory_info = proc.info['memory_info']
-            memory_percent = f"{proc.info['memory_percent']:.1f}".ljust(6) if proc.info['memory_percent'] else "N/A".ljust(6)
-            cpu_percent = f"{proc.info['cpu_percent']:.1f}".ljust(6) if proc.info['cpu_percent'] is not None else "0.0".ljust(6)
+            # Ensure memory_percent is a float
+            if proc.info['memory_percent'] is not None:
+                memory_percent = f"{proc.info['memory_percent']:.1f}".ljust(6)
+            else:
+                memory_percent = "0.0".ljust(6)
+            # Ensure cpu_percent is a float
+            if proc.info['cpu_percent'] is not None:
+                cpu_percent = f"{proc.info['cpu_percent']:.1f}".ljust(6)
+            else:
+                cpu_percent = "0.0".ljust(6)
             status = proc.info['status'].ljust(8) if proc.info['status'] else "N/A".ljust(8)
             virt = format_size(memory_info.vms).ljust(10) if memory_info else "N/A".ljust(10)
             res = format_size(memory_info.rss).ljust(10) if memory_info else "N/A".ljust(10)
@@ -135,7 +143,7 @@ def get_all_processes():
             command = proc.info['name'][:20].ljust(20) if proc.info['name'] else "N/A".ljust(20)  # Limit command length to 20 characters
             processes.append([pid, user, nice, virt, res, shr, status, cpu_percent, memory_percent, cpu_time, command])
         except (psutil.NoSuchProcess, psutil.AccessDenied, KeyError) as e:
-            processes.append([str(proc.info.get('pid', 'N/A')).ljust(8), "N/A".ljust(15), "N/A".ljust(5), "N/A".ljust(10), "N/A".ljust(10), "N/A".ljust(10), "N/A".ljust(8), "0.0".ljust(6), "N/A".ljust(6), "N/A".ljust(8), "N/A".ljust(20)])
+            processes.append([str(proc.info.get('pid', 'N/A')).ljust(8), "N/A".ljust(15), "N/A".ljust(5), "N/A".ljust(10), "N/A".ljust(10), "N/A".ljust(10), "N/A".ljust(8), "0.0".ljust(6), "0.0".ljust(6), "N/A".ljust(8), "N/A".ljust(20)])
     return processes
 
 def draw_table(window, title, connections, start_y, start_x, width, start_idx, max_lines, active):
@@ -380,7 +388,10 @@ def draw_system_info(window):
         pass
 
     # Get locale
-    locale_info = subprocess.check_output("locale | grep LANG=", shell=True).decode('utf-8').strip().split('=')[-1]
+    try:
+        locale_info = subprocess.check_output("locale | grep LANG=", shell=True).decode('utf-8').strip().split('=')[-1]
+    except subprocess.CalledProcessError:
+        locale_info = "N/A"
 
     # Select appropriate ASCII art for system
     if platform.system() == "Linux":
