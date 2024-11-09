@@ -27,7 +27,7 @@ NetScope is a powerful network and process monitoring tool inspired by `htop` an
 
 *Note: The screenshot may not reflect the latest features. Please refer to the application for the most up-to-date interface.*
 
-![NetScope](https://raw.githubusercontent.com/yodabytz/netscope/refs/heads/main/NetScope.jpg?raw=true)
+![NetScope](https://raw.githubusercontent.com/yodabytz/netscope/refs/heads/main/ScreenShot-1.png?raw=true)
 
 ## Installation Steps
 
