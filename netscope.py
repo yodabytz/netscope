@@ -111,20 +111,19 @@ def get_connections(status_filter):
             connections.append([laddr, raddr, status, pid, program, user])
     return connections
 
+# FIXED FUNCTION: Generalized process detection for all "amavisd-like" processes
 def get_all_processes():
     processes = []
-    for proc in psutil.process_iter(['pid', 'name', 'username', 'nice', 'memory_info', 'memory_percent', 'cpu_percent', 'cpu_times', 'status']):
+    for proc in psutil.process_iter(['pid', 'name', 'exe', 'cmdline', 'username', 'nice', 'memory_info', 'memory_percent', 'cpu_percent', 'cpu_times', 'status']):
         try:
             pid = str(proc.info['pid']).ljust(8)
-            user = (proc.info['username'][:15] if proc.info['username'] else "N/A").ljust(15)  # Limit the user name length to 15 characters
+            user = (proc.info['username'][:15] if proc.info['username'] else "N/A").ljust(15)
             nice = str(proc.info['nice']).ljust(5) if proc.info['nice'] is not None else "N/A".ljust(5)
             memory_info = proc.info['memory_info']
-            # Ensure memory_percent is a float
             if proc.info['memory_percent'] is not None:
                 memory_percent = f"{proc.info['memory_percent']:.1f}".ljust(6)
             else:
                 memory_percent = "0.0".ljust(6)
-            # Ensure cpu_percent is a float
             if proc.info['cpu_percent'] is not None:
                 cpu_percent = f"{proc.info['cpu_percent']:.1f}".ljust(6)
             else:
@@ -132,15 +131,23 @@ def get_all_processes():
             status = proc.info['status'].ljust(8) if proc.info['status'] else "N/A".ljust(8)
             virt = format_size(memory_info.vms).ljust(10) if memory_info else "N/A".ljust(10)
             res = format_size(memory_info.rss).ljust(10) if memory_info else "N/A".ljust(10)
-
-            # SHR field fix for Mac
             if platform.system() == "Darwin":
-                shr = "N/A".ljust(10)  # macOS does not provide shared memory info
+                shr = "N/A".ljust(10)
             else:
                 shr = format_size(getattr(memory_info, 'shared', None)).ljust(10) if memory_info else "N/A".ljust(10)
-
             cpu_time = f"{proc.info['cpu_times'].user:.2f}".ljust(8) if proc.info['cpu_times'] else "N/A".ljust(8)
-            command = proc.info['name'][:20].ljust(20) if proc.info['name'] else "N/A".ljust(20)  # Limit command length to 20 characters
+            # --- Begin Fix: Generalized for tricky process names ---
+            proc_name = proc.info['name'] or ''
+            exe = proc.info.get('exe') or ''
+            cmdline = proc.info.get('cmdline') or []
+            command = proc_name
+            # Prefer exe if it adds context, then cmdline
+            if exe and exe not in proc_name:
+                command = exe.split('/')[-1]
+            if cmdline and cmdline[0] and cmdline[0] not in command:
+                command = cmdline[0].split('/')[-1]
+            command = command[:20].ljust(20) if command else "N/A".ljust(20)
+            # --- End Fix ---
             processes.append([pid, user, nice, virt, res, shr, status, cpu_percent, memory_percent, cpu_time, command])
         except (psutil.NoSuchProcess, psutil.AccessDenied, KeyError) as e:
             processes.append([str(proc.info.get('pid', 'N/A')).ljust(8), "N/A".ljust(15), "N/A".ljust(5), "N/A".ljust(10), "N/A".ljust(10), "N/A".ljust(10), "N/A".ljust(8), "0.0".ljust(6), "0.0".ljust(6), "N/A".ljust(8), "N/A".ljust(20)])
