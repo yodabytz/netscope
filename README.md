@@ -1,6 +1,6 @@
-# NetScope 2.0.07
+# NetScope 2.0.11
 
-NetScope is a powerful network and process monitoring tool inspired by `htop` and `netstat`. It allows you to view established connections, listening connections, running processes, and interact with the processes. The tool is designed to be user-friendly and efficient, providing detailed information about your system's network and process activity.
+NetScope is a powerful network and process monitoring tool inspired by htop and netstat. It lets you inspect established and listening connections, browse running processes, and interact with them in a fast, keyboard-friendly UI. New in this release: a theming system with truecolor backgrounds (OSC 11) when supported, automatic 256-color/16-color fallbacks, and runtime theme switching (t). Themes can be supplied as JSON in /etc/netscope/themes/*.json; the default blue theme remains available out of the box.
 
 ## Features
 
@@ -49,8 +49,9 @@ NetScope is a powerful network and process monitoring tool inspired by `htop` an
 
 3. **Create Directories and Move Files**:
     ```sh
-    sudo mkdir -p /etc/netscope
+    sudo mkdir -p /etc/netscope/themes
     sudo cp ascii_art.py /etc/netscope/
+    sudo cp *.json /etc/netscope/themes/
     ```
 
 4. **Move the Script to `/usr/bin`**:
