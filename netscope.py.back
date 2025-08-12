@@ -32,12 +32,6 @@ PROC_SORT_DEFAULT = "cpu"  # default sort for processes
 CONN_KIND = os.environ.get("NETSCOPE_CONN_KIND", "tcp")  # tcp|tcp4|tcp6
 
 # -----------------------------------------------------------------------------
-# Minimal padding so content isn't jammed against borders
-# -----------------------------------------------------------------------------
-MAIN_X_PAD = 3  # main screens (stdscr)
-SUB_X_PAD  = 2  # inner panes/windows (e.g., Both view)
-
-# -----------------------------------------------------------------------------
 # Theming (default "blue"; external themes in /etc/netscope/themes/*.json)
 # Pairs: 1 text, 2 title/primary, 4 border/header, 5-8 accents, 9 muted
 # -----------------------------------------------------------------------------
@@ -47,6 +41,7 @@ THEME_DIR = "/etc/netscope/themes"
 def _osc_set_default_bg(hex_color: str):
     """Set terminal default background using OSC 11 to a truecolor hex."""
     try:
+        # Accept #RGB/#RRGGBB/#RRGGBBAA (alpha ignored)
         h = hex_color.lstrip("#")
         if len(h) == 3:
             h = "".join(c*2 for c in h)
@@ -68,18 +63,19 @@ class ThemeManager:
     def __init__(self):
         self.current = "blue"
         self._ids = {"bg":16,"fg":17,"accent":18,"accent2":19,"accent3":20,"accent4":21,"accent5":22,"muted":23}
-        self._palette = None
+        self._palette = None   # resolved palette dict when theme != blue
         self._truecolor_active = False
         atexit.register(self._on_exit_reset_bg)
 
+    # --- HEX helpers (accept #RGB/#RGBA/#RRGGBB/#RRGGBBAA; ignore alpha) ---
     @staticmethod
     def _hex_norm(hex_color: str) -> str:
         h = hex_color.lstrip("#").strip()
-        if len(h) == 3:
+        if len(h) == 3:      # #RGB
             h = "".join(c*2 for c in h)
-        elif len(h) == 4:
+        elif len(h) == 4:    # #RGBA
             h = "".join(c*2 for c in h[:3])
-        elif len(h) == 8:
+        elif len(h) == 8:    # #RRGGBBAA
             h = h[:6]
         return h.lower()
 
@@ -93,6 +89,7 @@ class ThemeManager:
         r,g,b = ThemeManager._hex_to_rgb(hex_color)
         return r*1000//255, g*1000//255, b*1000//255
 
+    # --- 256-color fallback mapping (for terminals without 'ccc') ---
     @staticmethod
     def _nearest_xterm256(hex_color: str) -> int:
         r,g,b = ThemeManager._hex_to_rgb(hex_color)
@@ -107,6 +104,7 @@ class ThemeManager:
         def dist(a,b,c, x,y,z): return (a-x)**2 + (b-y)**2 + (c-z)**2
         return cube_idx if dist(r,g,b,*cube_rgb) <= dist(r,g,b,*gray_rgb) else gray_index
 
+    # --- Truecolor detection ---
     @staticmethod
     def _supports_truecolor():
         force = os.environ.get("NETSCOPE_TRUECOLOR")
@@ -115,6 +113,7 @@ class ThemeManager:
         ct   = (os.environ.get("COLORTERM") or "").lower()
         term = (os.environ.get("TERM") or "").lower()
         in_tmux = bool(os.environ.get("TMUX"))
+        # If running in tmux with a modern term and features set, assume OK
         if in_tmux and ("-256color" in term or term.endswith("-direct")):
             return True
         return ("truecolor" in ct) or ("24bit" in ct) or term.endswith("-direct")
@@ -160,12 +159,16 @@ class ThemeManager:
         return accents
 
     def _on_exit_reset_bg(self):
+        # Always reset the terminal background on exit to avoid leaving user’s terminal colored.
         _osc_reset_default_bg()
 
     def apply(self, stdscr, name=None):
         """
-        Blue theme -> normal curses blue background.
-        Non-blue + truecolor -> set terminal default bg (OSC 11) + use bg=-1 so the full screen inherits exact hex.
+        - Blue theme -> standard curses pairs (solid blue), reset terminal default bg.
+        - Non-blue:
+            * If truecolor: set terminal default bg via OSC 11 to exact hex,
+              then init pairs with bg = -1 (inherit default). Full-screen bg will be exact hex.
+            * Else: approximate using 256 colors (or custom colors if supported).
         """
         curses.start_color()
         curses.use_default_colors()
@@ -177,6 +180,7 @@ class ThemeManager:
         name = self.current
 
         if name == "blue":
+            # Reset terminal bg to default to avoid mixing with blue theme
             _osc_reset_default_bg()
             for pid in (1,2,4,5,6,7,8,9):
                 curses.init_pair(pid, curses.COLOR_WHITE, curses.COLOR_BLUE)
@@ -185,9 +189,11 @@ class ThemeManager:
             if t:
                 p = self._extract_palette(t)
                 self._palette = p
+                # Truecolor path: set terminal default bg, pairs use bg=-1
                 if self._supports_truecolor():
                     self._truecolor_active = True
                     _osc_set_default_bg(p["bg"])
+                    # Foreground indices: try to program custom if possible; bg = -1 (default)
                     can_custom = curses.can_change_color() and (curses.COLORS or 0) >= 24
                     if can_custom:
                         for key in ("fg","accent","accent2","accent3","accent4","accent5","muted"):
@@ -201,6 +207,7 @@ class ThemeManager:
                         curses.init_pair(8, self._ids["accent5"], -1)
                         curses.init_pair(9, self._ids["muted"], -1)
                     else:
+                        # Map to nearest 256 for foregrounds; bg = -1
                         fg = self._nearest_xterm256(p["fg"])
                         a  = self._nearest_xterm256(p["accent"])
                         a2 = self._nearest_xterm256(p["accent2"])
@@ -217,6 +224,7 @@ class ThemeManager:
                         curses.init_pair(8, a5, -1)
                         curses.init_pair(9, mu, -1)
                 else:
+                    # No truecolor: approximate background too
                     can_custom = curses.can_change_color() and (curses.COLORS or 0) >= 24
                     if can_custom:
                         for key in ("bg","fg","accent","accent2","accent3","accent4","accent5","muted"):
@@ -250,10 +258,12 @@ class ThemeManager:
                         for pid in (1,2,4,5,6,7,8,9):
                             curses.init_pair(pid, curses.COLOR_WHITE, curses.COLOR_BLUE)
             else:
+                # Theme JSON missing -> fallback
                 _osc_reset_default_bg()
                 for pid in (1,2,4,5,6,7,8,9):
                     curses.init_pair(pid, curses.COLOR_WHITE, curses.COLOR_BLUE)
 
+        # Paint stdscr with current bg (default or explicit)
         if stdscr is not None:
             apply_window_bg(stdscr)
             stdscr.refresh()
@@ -332,6 +342,18 @@ def format_bytes(size):
     if size < 1024**2: return f"{size//1024} KB"
     if size < 1024**3: return f"{size//(1024**2)} MB"
     return f"{size//(1024**3)} GB"
+
+def format_mib(nbytes):
+    try:
+        return f"{int(nbytes // (1024**2))}MiB"
+    except Exception:
+        return "N/A"
+
+def format_gib(nbytes):
+    try:
+        return f"{int(nbytes // (1024**3))}G"
+    except Exception:
+        return "N/A"
 
 def compress_ipv6(addr):
     try:
@@ -434,44 +456,114 @@ def _format_conn_row(base_row, tick):
     return [laddr, raddr, status, str(pid) if pid else "N/A", name, user, sent, recv]
 
 # -----------------------------------------------------------------------------
-# System Info (richer, headings vs values colors)
+# Richer System Info (screenfetch-like)
 # -----------------------------------------------------------------------------
 
+_pkgs_cache = None
+_pkgs_cache_t = 0.0
 def _package_counts():
-    total = 0; details = []
-    try:
-        if shutil.which("dpkg-query"):
-            out = subprocess.run(["dpkg-query","-f","${Package}\n","-W"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=0.7).stdout
-            cnt = len([l for l in out.splitlines() if l.strip()]); total += cnt; details.append(f"dpkg:{cnt}")
-        elif shutil.which("dpkg"):
-            out = subprocess.run(["dpkg","-l"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=0.7).stdout
-            lines = [l for l in out.splitlines() if l.strip()]
-            cnt = max(0, len(lines) - 5); total += cnt; details.append(f"dpkg:{cnt}")
-    except Exception:
-        pass
-    for cmd, label in ((["rpm","-qa"],"rpm"), (["pacman","-Q"],"pacman"), (["apk","info"],"apk"), (["xbps-query","-l"],"xbps")):
+    global _pkgs_cache, _pkgs_cache_t
+    now = time.time()
+    if _pkgs_cache and (now - _pkgs_cache_t) < 300:
+        return _pkgs_cache
+
+    def _run_lines(cmd, timeout=0.7, skip_header=0):
         try:
-            if shutil.which(cmd[0]):
-                out = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=0.7).stdout
-                cnt = len([l for l in out.splitlines() if l.strip()]); total += cnt; details.append(f"{label}:{cnt}")
+            proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=timeout)
+            lines = [l for l in proc.stdout.splitlines() if l.strip()]
+            if skip_header and len(lines) >= skip_header:
+                lines = lines[skip_header:]
+            return len(lines)
         except Exception:
-            pass
+            return 0
+
+    counts = {}
+    if shutil.which("dpkg-query"):
+        counts["dpkg"] = _run_lines(["dpkg-query","-f","${Package}\n","-W"])
+    elif shutil.which("dpkg"):
+        counts["dpkg"] = _run_lines(["dpkg","-l"], skip_header=5)
+
+    if shutil.which("rpm"):
+        counts["rpm"] = _run_lines(["rpm","-qa"])
+
+    if shutil.which("pacman"):
+        counts["pacman"] = _run_lines(["pacman","-Q"])
+
+    if shutil.which("apk"):
+        counts["apk"] = _run_lines(["apk","info"])
+
+    if shutil.which("xbps-query"):
+        counts["xbps"] = _run_lines(["xbps-query","-l"])
+
+    if shutil.which("qlist"):
+        counts["gentoo"] = _run_lines(["qlist","-I"])
+
+    if shutil.which("snap"):
+        snaps = _run_lines(["snap","list"], skip_header=1)
+        if snaps: counts["snap"] = snaps
+
+    if shutil.which("flatpak"):
+        flats = _run_lines(["flatpak","list","--app"])
+        if flats: counts["flatpak"] = flats
+
+    total = sum(counts.values()) if counts else 0
+    details = ", ".join(f"{k}:{v}" for k,v in counts.items())
+    _pkgs_cache = (total, details)
+    _pkgs_cache_t = now
+    return _pkgs_cache
+
+def _cpu_model():
     try:
-        if shutil.which("snap"):
-            out = subprocess.run(["snap","list"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=0.7).stdout
-            lines = [l for l in out.splitlines() if l.strip()]
-            cnt = max(0, len(lines)-1); 
-            if cnt: total += cnt; details.append(f"snap:{cnt}")
+        with open("/proc/cpuinfo","r",encoding="utf-8",errors="ignore") as f:
+            for line in f:
+                if "model name" in line:
+                    return line.split(":",1)[1].strip()
     except Exception:
         pass
+    name = platform.processor() or ""
+    return name if name else "Unknown CPU"
+
+def _cpu_temp_c():
     try:
-        if shutil.which("flatpak"):
-            out = subprocess.run(["flatpak","list","--app"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=0.7).stdout
-            cnt = len([l for l in out.splitlines() if l.strip()])
-            if cnt: total += cnt; details.append(f"flatpak:{cnt}")
+        temps = psutil.sensors_temperatures(fahrenheit=False)
+        if not temps: return None
+        readings = []
+        for _, entries in temps.items():
+            for e in entries:
+                if hasattr(e, "current") and e.current is not None:
+                    readings.append(e.current)
+        return max(readings) if readings else None
+    except Exception:
+        return None
+
+def _gpu_string():
+    if not shutil.which("lspci"):
+        return None
+    try:
+        proc = subprocess.run(["lspci"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=0.7)
+        for line in proc.stdout.splitlines():
+            if re.search(r"\b(VGA compatible controller|3D controller|2D accelerator)\b", line, re.IGNORECASE):
+                return re.sub(r"^[0-9a-fA-F:.]+\s+", "", line).strip()
     except Exception:
         pass
-    return total, ", ".join(details)
+    return None
+
+def _shell_info():
+    try:
+        sh = os.environ.get("SHELL") or pwd.getpwuid(os.getuid()).pw_shell
+        name = os.path.basename(sh)
+        if shutil.which(name):
+            try:
+                ver_out = subprocess.run([name, "--version"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=0.5).stdout.splitlines()[0]
+                m = re.search(r"(zsh|bash|fish)\s*,?\s*version\s*([0-9][^\s)]*)", ver_out, re.IGNORECASE) or \
+                    re.search(r"(zsh|bash)\s+([0-9][^\s)]*)", ver_out, re.IGNORECASE)
+                if m: return f"{m.group(1)} {m.group(2)}"
+                return ver_out.strip()
+            except Exception:
+                return name
+        return name
+    except Exception:
+        return "Unknown"
 
 def _pretty_os_name():
     try:
@@ -486,10 +578,12 @@ def _pretty_os_name():
                         osr[k] = v.strip().strip('"')
         if "PRETTY_NAME" in osr:
             return osr["PRETTY_NAME"]
-        name = osr.get("NAME"); ver = osr.get("VERSION") or osr.get("VERSION_ID")
+        name = osr.get("NAME")
+        ver = osr.get("VERSION") or osr.get("VERSION_ID")
         return f"{name} {ver}".strip()
     except Exception:
-        return platform.platform()
+        pass
+    return platform.platform()
 
 def _uptime_str():
     try:
@@ -510,7 +604,7 @@ def _kernel_str():
 def _disk_str():
     try:
         d = psutil.disk_usage("/")
-        used = f"{int(d.used // (1024**3))}G"; total = f"{int(d.total // (1024**3))}G"
+        used = format_gib(d.used); total = format_gib(d.total)
         return f"{used} / {total} ({int(d.percent)}%)"
     except Exception:
         return "N/A"
@@ -518,58 +612,9 @@ def _disk_str():
 def _ram_str():
     try:
         m = psutil.virtual_memory()
-        used = f"{int(m.used // (1024**2))}MiB"; total = f"{int(m.total // (1024**2))}MiB"
-        return f"{used} / {total}"
+        return f"{format_mib(m.used)} / {format_mib(m.total)}"
     except Exception:
         return "N/A"
-
-def _cpu_model():
-    try:
-        with open("/proc/cpuinfo","r",encoding="utf-8",errors="ignore") as f:
-            for line in f:
-                if "model name" in line:
-                    return line.split(":",1)[1].strip()
-    except Exception:
-        pass
-    return platform.processor() or "Unknown CPU"
-
-def _cpu_temp_c():
-    try:
-        temps = psutil.sensors_temperatures(fahrenheit=False)
-        if not temps: return None
-        vals = [e.current for arr in temps.values() for e in arr if getattr(e, "current", None) is not None]
-        return max(vals) if vals else None
-    except Exception:
-        return None
-
-def _gpu_string():
-    if not shutil.which("lspci"):
-        return None
-    try:
-        out = subprocess.run(["lspci"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=0.7).stdout
-        for line in out.splitlines():
-            if re.search(r"\b(VGA compatible controller|3D controller|2D accelerator)\b", line, re.IGNORECASE):
-                return re.sub(r"^[0-9a-fA-F:.]+\s+", "", line).strip()
-    except Exception:
-        pass
-    return None
-
-def _shell_info():
-    try:
-        sh = os.environ.get("SHELL") or pwd.getpwuid(os.getuid()).pw_shell
-        name = os.path.basename(sh)
-        if shutil.which(name):
-            try:
-                vo = subprocess.run([name, "--version"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=0.5).stdout.splitlines()[0]
-                m = re.search(r"(zsh|bash|fish)\s*,?\s*version\s*([0-9][^\s)]*)", vo, re.IGNORECASE) or \
-                    re.search(r"(zsh|bash)\s+([0-9][^\s)]*)", vo, re.IGNORECASE)
-                if m: return f"{m.group(1)} {m.group(2)}"
-                return vo.strip()
-            except Exception:
-                return name
-        return name
-    except Exception:
-        return "Unknown"
 
 def get_system_info_items():
     host = platform.node() or socket.gethostname() or "Unknown"
@@ -581,6 +626,8 @@ def get_system_info_items():
     disk = _disk_str()
     cpu_name = _cpu_model()
     cpu_temp = _cpu_temp_c()
+    threads = psutil.cpu_count(logical=True) or 0
+    cores = psutil.cpu_count(logical=False) or threads or 0
     freq = None
     try:
         f = psutil.cpu_freq()
@@ -590,8 +637,7 @@ def get_system_info_items():
             freq = f.current/1000.0
     except Exception:
         pass
-    cores = psutil.cpu_count(logical=False) or 0
-    freq_str = f" @ {cores}x {freq:.1f}GHz" if (cores and freq) else (f" @ {cores}x" if cores else "")
+    freq_str = f" @ {cores}x {freq:.1f}GHz" if freq else (f" @ {cores}x" if cores else "")
     temp_str = f" [{cpu_temp:.1f}°C]" if (cpu_temp is not None) else ""
     cpu_line = f"{cpu_name}{freq_str}{temp_str}"
     gpu_line = _gpu_string() or "Unknown GPU"
@@ -723,20 +769,22 @@ def screen_splash(stdscr):
     sel = 0
 
     logo_top = max(2, h//6)
-    ascii_attr = curses.color_pair(7) | curses.A_BOLD  # same as 1 for default "blue"
-    for i, line in enumerate(NETSCOPE_SPLASH_ASCII):
-        x = max(MAIN_X_PAD, (w - len(line)) // 2)
-        try: stdscr.addstr(logo_top + i, x, line, ascii_attr)
-        except curses.error: pass
-
-    menu_top = logo_top + len(NETSCOPE_SPLASH_ASCII) + 2
-    menu_colors = [2,5,6,7,8,9]  # resolved to the active theme; all white/blue on default
+    ascii_attr = curses.color_pair(7) | curses.A_BOLD
+    menu_colors = [2,5,6,7,8,9]
 
     def draw_menu():
         apply_window_bg(stdscr)
         border_title(stdscr, f"{title} {VERSION}")
+        h, w = stdscr.getmaxyx()
+
+        for i, line in enumerate(NETSCOPE_SPLASH_ASCII):
+            x = max(0, (w - len(line)) // 2)
+            try: stdscr.addstr(logo_top + i, x, line, ascii_attr)
+            except curses.error: pass
+
+        menu_top = logo_top + len(NETSCOPE_SPLASH_ASCII) + 2
         for idx, item in enumerate(menu):
-            x = max(MAIN_X_PAD, (w - len(item)) // 2)
+            x = max(0, (w - len(item)) // 2)
             base = curses.color_pair(menu_colors[idx % len(menu_colors)])
             attr = (base | curses.A_BOLD | curses.A_REVERSE) if idx == sel else (base | curses.A_BOLD)
             try: stdscr.addstr(menu_top + idx, x, item, attr)
@@ -746,7 +794,12 @@ def screen_splash(stdscr):
     draw_menu()
     while True:
         ch = stdscr.getch()
-        if ch == -1: continue
+        if ch == -1:
+            nh, nw = stdscr.getmaxyx()
+            if (nh, nw) != (h, w):
+                h, w = nh, nw
+                draw_menu()
+            continue
         if ch == ord('t'):
             theme_dialog(stdscr); THEME.apply(stdscr); draw_menu(); continue
         if ch in (curses.KEY_UP, ord('k')): sel = (sel - 1) % len(menu); draw_menu()
@@ -776,43 +829,41 @@ def screen_system_info(stdscr, interval):
         if ch == ord('t'): theme_dialog(stdscr); last_tick = 0
 
 def _render_system_info(stdscr, distro_art):
+    items = get_system_info_items()
+
     apply_window_bg(stdscr)
     border_title(stdscr, "System Info (Backspace/Left = Back, t = Theme, q = Quit)")
     h, w = stdscr.getmaxyx()
-    info = get_system_info_items()
 
-    block = []
-    if distro_art:
-        block.extend(distro_art); block.append("")
-    # compute maximum label width
-    label_w = max((len(k) for k,_ in info), default=0) + 2
+    label_w = max((len(k) for k, _ in items), default=0) + 2
 
-    # width used by info lines
-    max_w = 0
-    for k, v in info:
-        max_w = max(max_w, label_w + len(v))
+    text_lines = (len(distro_art) + 1 + len(items)) if distro_art else len(items)
+    max_line_len = 0
+    for k,v in items:
+        max_line_len = max(max_line_len, label_w + len(v))
     if distro_art:
         for line in distro_art:
-            max_w = max(max_w, len(line))
+            max_line_len = max(max_line_len, len(line))
+    start_y = max(1, (h - text_lines)//2)
+    start_x = max(1, (w - min(w-2, max_line_len))//2)
 
-    start_y = max(1, (h - (len(block) + len(info))) // 2) if distro_art else max(1, (h - len(info)) // 2)
-    start_x = max(MAIN_X_PAD, (w - max_w) // 2)
-
-    y = start_y
     if distro_art:
-        for line in distro_art:
-            try: stdscr.addstr(y, start_x, line[:max(1, w - start_x - 1)], curses.color_pair(2) | curses.A_BOLD)
+        for i, line in enumerate(distro_art):
+            try: stdscr.addstr(start_y + i, start_x, line[:max(1, w - start_x - 1)], curses.color_pair(2) | curses.A_BOLD)
             except curses.error: pass
-            y += 1
-        y += 1  # blank line
+        info_y = start_y + len(distro_art) + 1
+    else:
+        info_y = start_y
 
-    for k, v in info:
+    for i, (k, v) in enumerate(items):
+        y = info_y + i
         try:
             stdscr.addstr(y, start_x, _pad(k + ":", label_w, 'left'), curses.color_pair(2) | curses.A_BOLD)
-            stdscr.addstr(y, start_x + label_w, v[:max(1, w - (start_x + label_w) - 1)], curses.color_pair(6))
+            max_vw = max(1, w - (start_x + label_w) - 1)
+            stdscr.addstr(y, start_x + label_w, v[:max_vw], curses.color_pair(6))
         except curses.error:
             pass
-        y += 1
+
     stdscr.refresh()
 
 # Connections (Established/Listening) — immediate fetch + atomic render (no flicker)
@@ -864,7 +915,7 @@ def _render_connections(stdscr, rows, start_idx, mode, tick):
     apply_window_bg(stdscr)
     border_title(stdscr, f"{mode} Connections (Backspace/Left = Back, t = Theme, q = Quit)")
     h, w = stdscr.getmaxyx()
-    y = 2; x = MAIN_X_PAD
+    y = 2; x = 2
     draw_table_header(stdscr, y, x, CONN_COLS, CONN_COLORS, sep=" ")
     draw_hline(stdscr, y+1, 1, w-2)
     max_lines = max(1, h - (y + 3))
@@ -909,7 +960,7 @@ def screen_both(stdscr, interval):
         # Top
         apply_window_bg(top)
         border_title(top, "Established" + (" [ACTIVE]" if active=="EST" else ""))
-        y = 2; x = SUB_X_PAD
+        y = 2; x = 1
         draw_table_header(top, y, x, CONN_COLS, CONN_COLORS, sep=" ")
         draw_hline(top, y+1, 1, top.getmaxyx()[1]-2)
         max_est = max(0, top.getmaxyx()[0] - (y + 3))
@@ -921,7 +972,7 @@ def screen_both(stdscr, interval):
         # Bottom
         apply_window_bg(bottom)
         border_title(bottom, "Listening" + (" [ACTIVE]" if active=="LIS" else ""))
-        y = 2; x = SUB_X_PAD
+        y = 2; x = 1
         draw_table_header(bottom, y, x, CONN_COLS, CONN_COLORS, sep=" ")
         draw_hline(bottom, y+1, 1, bottom.getmaxyx()[1]-2)
         max_lis = max(0, bottom.getmaxyx()[0] - (y + 3))
@@ -1030,7 +1081,7 @@ def _render_processes(stdscr, rows, start_idx, sel, sort_mode):
     apply_window_bg(stdscr)
     border_title(stdscr, f"Running Processes (sort: {sort_mode.upper()} | c/m • k:Kill • s:Search • n:Next • ?:Help)")
     h, w = stdscr.getmaxyx()
-    y = 2; x = MAIN_X_PAD
+    y = 2; x = 1
     draw_table_header(stdscr, y, x, PROC_COLS, PROC_COLORS, sep=" ")
     draw_hline(stdscr, y+1, 1, w-2)
     max_lines = max(1, h - 6)
@@ -1227,6 +1278,7 @@ def main():
     try:
         curses.wrapper(lambda stdscr: run(stdscr, max(1, int(args.d)), args.theme))
     finally:
+        # Always reset terminal default background on exit
         _osc_reset_default_bg()
 
 if __name__ == "__main__":
