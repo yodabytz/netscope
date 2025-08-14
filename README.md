@@ -51,7 +51,7 @@ NetScope is a powerful network and process monitoring tool inspired by htop and 
     ```sh
     sudo mkdir -p /etc/netscope/themes
     sudo cp ascii_art.py /etc/netscope/
-    sudo cp *.json /etc/netscope/themes/
+    sudo cp -r themes /etc/netscope/
     ```
 
 4. **Move the Script to `/usr/bin`**:
