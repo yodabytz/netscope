@@ -400,7 +400,7 @@ def _snapshot_connections(tick):
             raddr = f"{compress_ipv6(c.raddr.ip)}:{c.raddr.port}" if c.raddr else "N/A"
             pid = int(c.pid) if c.pid else 0
             row = (laddr, raddr, "ESTABLISHED" if status == psutil.CONN_ESTABLISHED else "LISTEN", pid)
-            if status == psutil.CONN_ESTABLISHED":
+            if status == psutil.CONN_ESTABLISHED:
                 est.append(row)
             else:
                 lis.append(row)
@@ -487,6 +487,7 @@ def process_table():
 # -----------------------------------------------------------------------------
 
 MIN_WIDTH = 120
+INNER_LEFT_PAD = 2  # small left margin inside inner windows/tables
 
 def border_title(win, title):
     win.attron(curses.color_pair(4))
@@ -771,7 +772,7 @@ def screen_both(stdscr, interval):
         # Top
         top.erase()
         border_title(top, "Established" + (" [ACTIVE]" if active=="EST" else ""))
-        y = 2; x = 1
+        y = 2; x = INNER_LEFT_PAD
         draw_table_header(top, y, x, CONN_COLS, CONN_COLORS, sep=" ")
         draw_hline(top, y+1, 1, top.getmaxyx()[1]-2)
         max_est = max(0, top.getmaxyx()[0] - (y + 3))
@@ -783,7 +784,7 @@ def screen_both(stdscr, interval):
         # Bottom
         bottom.erase()
         border_title(bottom, "Listening" + (" [ACTIVE]" if active=="LIS" else ""))
-        y = 2; x = 1
+        y = 2; x = INNER_LEFT_PAD
         draw_table_header(bottom, y, x, CONN_COLS, CONN_COLORS, sep=" ")
         draw_hline(bottom, y+1, 1, bottom.getmaxyx()[1]-2)
         max_lis = max(0, bottom.getmaxyx()[0] - (y + 3))
@@ -987,7 +988,7 @@ def _render_processes(stdscr, rows, start_idx, sel, sort_mode):
     stdscr.bkgd(curses.color_pair(1))
     border_title(stdscr, f"Running Processes (sort: {sort_mode.upper()} | c/m • k:Kill • s:Search • n:Next • ?:Help)")
     h, w = stdscr.getmaxyx()
-    y = 2; x = 1
+    y = 2; x = INNER_LEFT_PAD
     draw_table_header(stdscr, y, x, PROC_COLS, PROC_COLORS, sep=" ")
     draw_hline(stdscr, y+1, 1, w-2)
     max_lines = max(1, h - 6)
