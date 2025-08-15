@@ -290,6 +290,26 @@ def load_ascii_art_dict():
 ASCII_ART_DICT = load_ascii_art_dict()
 
 def detect_distro_key():
+    """
+    Robust OS/distro key detection to select the correct ASCII logo from ASCII_ART_DICT.
+
+    Priority:
+      1) Linux: parse /etc/os-release (ID, VARIANT_ID, ID_LIKE, NAME, PRETTY_NAME)
+      2) platform.system() fallback for non-Linux (Darwin/macOS, Windows)
+      3) WSL hints (platform.release, /proc/version, WSL_DISTRO_NAME)
+      4) Exact match against available keys; then normalized/fuzzy contains both ways
+      5) Conservative defaults if nothing matches
+
+    All comparisons are case-insensitive; ASCII_ART_DICT keys are expected to be lower-case.
+    """
+    # Helper to normalize strings for fuzzy matching
+    def _norm(s: str) -> str:
+        s = s.lower()
+        # strip non-alphanumerics
+        s = "".join(ch for ch in s if ch.isalnum())
+        # remove generic "linux" to match 'arch' vs 'archlinux'
+        return s.replace("linux", "")
+
     osr = {}
     try:
         with open("/etc/os-release","r",encoding="utf-8") as f:
@@ -299,17 +319,91 @@ def detect_distro_key():
                     osr[k] = v.strip().strip('"')
     except Exception:
         pass
-    cands = []
-    if osr.get("ID"): cands.append(osr["ID"].lower())
-    if osr.get("ID_LIKE"): cands.extend([p.strip().lower() for p in osr["ID_LIKE"].split()])
-    if osr.get("NAME"):
-        name = osr["NAME"].lower()
-        for key in ASCII_ART_DICT.keys():
-            if key in name: cands.append(key)
-    for c in cands:
-        if c in ASCII_ART_DICT: return c
-    for alias in ("debian","ubuntu","arch","fedora","centos","alpine"):
-        if alias in ASCII_ART_DICT: return alias
+
+    candidates = []
+
+    # 1) Linux os-release signals
+    for key in ("ID","VARIANT_ID"):
+        if osr.get(key):
+            candidates.append(osr[key].lower())
+
+    if osr.get("ID_LIKE"):
+        candidates.extend([p.strip().lower() for p in osr["ID_LIKE"].split() if p.strip()])
+
+    for key in ("NAME","PRETTY_NAME"):
+        if osr.get(key):
+            name = osr[key].lower()
+            # If any existing key appears in NAME fields, add that exact key candidate.
+            for k in ASCII_ART_DICT.keys():
+                if k in name:
+                    candidates.append(k)
+            # Also add cleaned name itself
+            candidates.append(name)
+
+    # 2) platform/system fallbacks (Darwin/Windows/others)
+    try:
+        sysname = platform.system().lower()
+    except Exception:
+        sysname = ""
+    if sysname:
+        if sysname in ("darwin", "mac", "macos", "osx"):
+            candidates += ["darwin", "macos", "osx", "apple"]
+        elif sysname == "windows":
+            candidates += ["windows", "microsoft", "win"]
+        else:
+            candidates.append(sysname)
+
+    # 3) WSL bias (Windows Subsystem for Linux often runs Ubuntu/Debian)
+    try:
+        rel = platform.release().lower()
+    except Exception:
+        rel = ""
+    try:
+        with open("/proc/version","r",encoding="utf-8") as f:
+            ver = f.read().lower()
+    except Exception:
+        ver = ""
+    if "microsoft" in rel or "microsoft" in ver or os.environ.get("WSL_DISTRO_NAME"):
+        # Prefer the actual WSL distro name if present
+        wsl_name = (os.environ.get("WSL_DISTRO_NAME") or "").lower()
+        if wsl_name:
+            candidates.append(wsl_name)
+        # Add common WSL distros as fallbacks
+        candidates += ["ubuntu", "debian", "arch", "fedora", "opensuse", "kali"]
+
+    # Build normalized lookup of available ascii keys
+    keys = list(ASCII_ART_DICT.keys())
+    norm_map = { _norm(k): k for k in keys if isinstance(k, str) }
+
+    # 4a) Exact matches first
+    for c in candidates:
+        if c in ASCII_ART_DICT:
+            return c
+
+    # 4b) Normalized exact
+    for c in candidates:
+        nc = _norm(c)
+        if nc in norm_map and norm_map[nc] in ASCII_ART_DICT:
+            return norm_map[nc]
+
+    # 4c) Contains (both ways) using normalized forms
+    for c in candidates:
+        nc = _norm(c)
+        for nk, original_key in norm_map.items():
+            if not nk:
+                continue
+            if nc and (nc in nk or nk in nc):
+                return original_key
+
+    # 5) Defaults (prefer common distros if present; then OS families)
+    for alias in (
+        "ubuntu","debian","arch linux","arch","fedora","centos","rhel","rocky","almalinux",
+        "opensuse","suse","alpine","gentoo","manjaro","kali","mint","pop","pop-os",
+        "darwin","macos","osx","windows"
+    ):
+        if alias in ASCII_ART_DICT:
+            return alias
+
     if ASCII_ART_DICT:
         return next(iter(ASCII_ART_DICT.keys()))
     return None
@@ -1039,7 +1133,7 @@ Usage:
 Options:
   -d <seconds>        Update interval (default: 3)
   -t, --theme <name>  Theme to load from /etc/netscope/themes (default blue)
-  -h                  Show this help
+  -h                  Show help
   -v                  Show version
 
 Controls (global):
