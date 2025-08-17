@@ -249,24 +249,24 @@ ascii_art_dict = {
 
 PAIR_HINT = {'fg':1, 'accent':2, 'accent2':5, 'accent3':6, 'accent4':7, 'accent5':8, 'muted':9}
 
-# Enhanced color policies based on actual distro brand colors
+# Enhanced color policies based on screenfetch/neofetch brand colors
 ASCII_COLOR_POLICY = {
     'darwin': {'mode': 'stripe', 'palette_order': ['accent3','accent','accent2','accent2','accent5','accent4']},  # Apple rainbow
-    'slackware': {'mode': 'flat', 'color': 'accent4'},  # Blue
-    'arch linux': {'mode': 'flat', 'color': 'accent4'},  # Blue
-    'ubuntu': {'mode': 'flat', 'color': 'accent2'},  # Orange/Red
-    'ubuntu budgie': {'mode': 'flat', 'color': 'accent4'},  # Blue
-    'debian': {'mode': 'stripe', 'palette_order': ['fg','fg','accent2','accent2','fg','fg']},  # Light with red center
-    'fedora': {'mode': 'flat', 'color': 'accent4'},  # Blue
-    'opensuse': {'mode': 'flat', 'color': 'accent3'},  # Green
-    'mint': {'mode': 'flat', 'color': 'accent3'},  # Green
-    'manjaro': {'mode': 'flat', 'color': 'accent3'},  # Green
-    'gentoo': {'mode': 'flat', 'color': 'accent5'},  # Purple
-    'kali': {'mode': 'flat', 'color': 'accent4'},  # Blue
-    'elementary': {'mode': 'flat', 'color': 'accent4'},  # Blue
-    'red hat': {'mode': 'flat', 'color': 'accent2'},  # Red
-    'redhat': {'mode': 'flat', 'color': 'accent2'},  # Red
-    'rhel': {'mode': 'flat', 'color': 'accent2'},  # Red
+    'slackware': {'mode': 'stripe', 'palette_order': ['accent4','fg','accent4','fg','accent4','fg']},  # Blue/white alternating
+    'arch linux': {'mode': 'stripe', 'palette_order': ['accent4','accent','accent4','accent','accent4','accent']},  # Cyan/blue gradient
+    'ubuntu': {'mode': 'stripe', 'palette_order': ['accent2','fg','accent2','fg','accent2','fg']},  # Orange/white pattern  
+    'ubuntu budgie': {'mode': 'stripe', 'palette_order': ['accent4','accent','accent4','accent','accent4','accent']},  # Blue gradient
+    'debian': {'mode': 'flat', 'color': 'accent2'},  # Red Debian swirl
+    'fedora': {'mode': 'stripe', 'palette_order': ['accent4','fg','accent4','fg','accent4','fg']},  # Blue/white pattern
+    'opensuse': {'mode': 'stripe', 'palette_order': ['accent3','fg','accent3','fg','accent3','fg']},  # Green/white
+    'mint': {'mode': 'stripe', 'palette_order': ['accent3','fg','accent3','fg','accent3','fg']},  # Mint green/white
+    'manjaro': {'mode': 'stripe', 'palette_order': ['accent3','fg','accent3','fg','accent3','fg']},  # Green/white
+    'gentoo': {'mode': 'stripe', 'palette_order': ['accent5','fg','accent5','fg','accent5','fg']},  # Purple/white
+    'kali': {'mode': 'stripe', 'palette_order': ['accent4','fg','accent4','fg','accent4','fg']},  # Blue/white dragon
+    'elementary': {'mode': 'stripe', 'palette_order': ['accent4','fg','accent4','fg','accent4','fg']},  # Blue/white gradient
+    'red hat': {'mode': 'stripe', 'palette_order': ['accent2','fg','accent2','fg','accent2','fg']},  # Red/white
+    'redhat': {'mode': 'stripe', 'palette_order': ['accent2','fg','accent2','fg','accent2','fg']},  # Red/white
+    'rhel': {'mode': 'stripe', 'palette_order': ['accent2','fg','accent2','fg','accent2','fg']},  # Red/white
 }
 
 def _rstrip_lines(lines):
