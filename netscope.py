@@ -2182,6 +2182,7 @@ def screen_processes(stdscr, interval):
     boost_until = 0.0
     search_term = None
     last_search_idx = -1
+    sticky_pid = None
 
     def get_sort_key(row):
         if sort_col == "cpu":
@@ -2208,6 +2209,19 @@ def screen_processes(stdscr, interval):
             last = now
             rows = process_table()
             rows.sort(key=get_sort_key, reverse=True)
+
+            if sticky_pid is not None:
+                found_sticky = False
+                for i, r in enumerate(rows):
+                    if int(r[0]) == sticky_pid:
+                        max_lines = max(1, stdscr.getmaxyx()[0] - 6)
+                        start_idx = max(0, i - max_lines // 2)
+                        sel_idx = i - start_idx
+                        found_sticky = True
+                        break
+                if not found_sticky:
+                    sticky_pid = None # process is gone
+
             _render_processes(stdscr, rows, start_idx, sel_idx, sort_col)
 
         ch = stdscr.getch()
@@ -2239,6 +2253,7 @@ def screen_processes(stdscr, interval):
         elif ch == ord('s'):
             search_term = _prompt(stdscr, "Search processes:", "").strip()
             last_search_idx = -1
+            sticky_pid = None
             if search_term:
                 # find first match
                 for i, r in enumerate(rows):
@@ -2248,10 +2263,12 @@ def screen_processes(stdscr, interval):
                         start_idx = max(0, i - max_lines // 2)
                         sel_idx = i - start_idx
                         last_search_idx = i
+                        sticky_pid = int(r[0])
                         break
             _render_processes(stdscr, rows, start_idx, sel_idx, sort_col)
         elif ch == ord('n'):
             if search_term:
+                sticky_pid = None
                 found = False
                 for i in range(last_search_idx + 1, len(rows)):
                     if re.search(search_term, rows[i][10], re.IGNORECASE):
@@ -2259,6 +2276,7 @@ def screen_processes(stdscr, interval):
                         start_idx = max(0, i - max_lines // 2)
                         sel_idx = i - start_idx
                         last_search_idx = i
+                        sticky_pid = int(rows[i][0])
                         found = True
                         break
                 if not found:
@@ -2269,9 +2287,11 @@ def screen_processes(stdscr, interval):
                             start_idx = max(0, i - max_lines // 2)
                             sel_idx = i - start_idx
                             last_search_idx = i
+                            sticky_pid = int(rows[i][0])
                             break
             _render_processes(stdscr, rows, start_idx, sel_idx, sort_col)
         elif ch == curses.KEY_UP:
+            sticky_pid = None
             if sel_idx > 0:
                 sel_idx -= 1
             elif start_idx > 0:
@@ -2279,6 +2299,7 @@ def screen_processes(stdscr, interval):
             _render_processes(stdscr, rows, start_idx, sel_idx, sort_col)
             stdscr.timeout(SCROLL_MS); boosting = True; boost_until = time.time() + (SCROLL_BOOST_MS/1000.0)
         elif ch in (curses.KEY_DOWN, ord('j')):
+            sticky_pid = None
             max_lines = max(1, stdscr.getmaxyx()[0] - 6)
             if sel_idx < max_lines - 1 and sel_idx < len(rows) - 1 - start_idx:
                 sel_idx += 1
