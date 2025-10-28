@@ -2271,7 +2271,7 @@ def screen_processes(stdscr, interval):
                             last_search_idx = i
                             break
             _render_processes(stdscr, rows, start_idx, sel_idx, sort_col)
-        elif ch in (curses.KEY_UP, ord('k')):
+        elif ch == curses.KEY_UP:
             if sel_idx > 0:
                 sel_idx -= 1
             elif start_idx > 0:
@@ -2306,7 +2306,7 @@ def screen_processes(stdscr, interval):
             _popup_help(stdscr, [
                 " Running Processes ",
                 "",
-                " Up/Down        : scroll",
+                " Up/Down or j   : scroll",
                 " k              : kill selected process",
                 " i              : ignore selected process",
                 " l              : list ignored processes",
