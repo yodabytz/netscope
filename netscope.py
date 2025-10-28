@@ -1641,15 +1641,23 @@ def screen_system_info(stdscr, interval):
                 _render_system_info_optimized(stdscr, logo_data, current_info)
                 last_render_hash = current_hash
                 
-        ch = stdscr.getch()
-        if ch == -1: 
-            continue
-        if ch in (curses.KEY_BACKSPACE, curses.KEY_LEFT, 127): 
-            return
-        if ch in (ord('q'), 27):
-            return
-        if ch == ord('t'):
-            theme_dialog(stdscr)
+                ch = stdscr.getch()
+                
+                if ch == -1: 
+                
+                    continue
+                
+                if ch in (curses.KEY_BACKSPACE, curses.KEY_LEFT, 127): 
+                
+                    return
+                
+                if ch in (ord('q'), 27):
+                
+                    return
+                
+                if ch == ord('t'):
+                
+                    theme_dialog(stdscr)
             # Refresh system cache when theme changes
             global _SYSTEM_INFO_CACHE
             _SYSTEM_INFO_CACHE = None
@@ -1817,10 +1825,8 @@ def screen_connections(stdscr, interval, mode):
 
         ch = stdscr.getch()
         if ch == -1: continue
-                if ch in (curses.KEY_BACKSPACE, curses.KEY_LEFT, 127): 
-                    return
-                if ch in (ord('q'), 27): 
-                    return
+        if ch in (curses.KEY_BACKSPACE, curses.KEY_LEFT, 127): return
+        if ch in (ord('q'), 27): return
         if ch == ord('t'): 
             theme_dialog(stdscr); 
             last = 0; 
