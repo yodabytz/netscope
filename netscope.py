@@ -1646,10 +1646,9 @@ def screen_system_info(stdscr, interval):
             continue
         if ch in (curses.KEY_BACKSPACE, curses.KEY_LEFT, 127): 
             return
-        if ch in (ord('q'), 27): 
-            raise SystemExit
-        if ch == ord('t'): 
-            theme_dialog(stdscr)
+                if ch in (ord('q'), 27):
+                    return
+                if ch == ord('t'):            theme_dialog(stdscr)
             # Refresh system cache when theme changes
             global _SYSTEM_INFO_CACHE
             _SYSTEM_INFO_CACHE = None
@@ -1817,8 +1816,10 @@ def screen_connections(stdscr, interval, mode):
 
         ch = stdscr.getch()
         if ch == -1: continue
-        if ch in (curses.KEY_BACKSPACE, curses.KEY_LEFT, 127): return
-        if ch in (ord('q'), 27): raise SystemExit
+                if ch in (curses.KEY_BACKSPACE, curses.KEY_LEFT, 127): 
+                    return
+                if ch in (ord('q'), 27): 
+                    return
         if ch == ord('t'): 
             theme_dialog(stdscr); 
             last = 0; 
@@ -1910,8 +1911,7 @@ def screen_ignored_list(stdscr):
         ch = stdscr.getch()
         if ch in (curses.KEY_BACKSPACE, curses.KEY_LEFT, 127):
             return
-        if ch in (ord('q'), 27):
-            raise SystemExit
+        if ch in (ord('q'), 27): return
         elif ch in (curses.KEY_UP, ord('k')):
             if sel_idx > 0:
                 sel_idx -= 1
@@ -2007,7 +2007,7 @@ def screen_both(stdscr, interval):
         ch = stdscr.getch()
         if ch == -1: continue
         if ch in (curses.KEY_BACKSPACE, curses.KEY_LEFT, 127): return
-        if ch in (ord('q'), 27): raise SystemExit
+        if ch in (ord('q'), 27): return
         if ch == ord('t'): 
             theme_dialog(stdscr); 
             last = 0; 
@@ -2227,7 +2227,7 @@ def screen_processes(stdscr, interval):
         ch = stdscr.getch()
         if ch == -1: continue
         if ch in (curses.KEY_BACKSPACE, curses.KEY_LEFT, 127): return
-        if ch in (ord('q'), 27): raise SystemExit
+        if ch in (ord('q'), 27): return
         if ch == ord('t'): 
             theme_dialog(stdscr); 
             last = 0; 
@@ -2357,8 +2357,7 @@ def screen_processes(stdscr, interval):
         ch = stdscr.getch()
         if ch == -1: continue
         if ch in (curses.KEY_BACKSPACE, curses.KEY_LEFT, 127): return
-        if ch in (ord('q'), 27): raise SystemExit
-        if ch == ord('t'): theme_dialog(stdscr); last = 0; _render_processes(stdscr, rows, start_idx, sel_idx, sort_col)
+        if ch in (ord('q'), 27): return
         elif ch in (curses.KEY_UP, ord('k')):
             sel_idx = max(0, sel_idx - 1)
             max_lines = max(1, stdscr.getmaxyx()[0] - 6)
