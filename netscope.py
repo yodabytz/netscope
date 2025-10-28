@@ -2088,6 +2088,22 @@ def _popup_help(stdscr, lines):
     win.refresh()
     win.getch()
 
+def _prompt(stdscr, title, initial_text=""):
+    h, w = stdscr.getmaxyx()
+    win_h = 5
+    win_w = max(40, len(title) + len(initial_text) + 6)
+    y = (h - win_h) // 2
+    x = (w - win_w) // 2
+    win = curses.newwin(win_h, win_w, y, x)
+    win.bkgd(curses.color_pair(1))
+    border_title(win, title)
+    
+    curses.echo()
+    win.addstr(2, 2, "> ")
+    s = win.getstr(2, 4, win_w - 6).decode("utf-8")
+    curses.noecho()
+    return s
+
 # Confirm kill
 def confirm_kill(stdscr, name, pid):
     msg = f"Terminate '{name}' (PID {pid})? (y/n)"
@@ -2164,6 +2180,8 @@ def screen_processes(stdscr, interval):
     sort_col = PROC_SORT_DEFAULT
     boosting = False
     boost_until = 0.0
+    search_term = None
+    last_search_idx = -1
 
     def get_sort_key(row):
         if sort_col == "cpu":
@@ -2182,7 +2200,6 @@ def screen_processes(stdscr, interval):
     rows.sort(key=get_sort_key, reverse=True)
     _render_processes(stdscr, rows, start_idx, sel_idx, sort_col)
     last = time.time()
-    search_term = None
 
     while True:
         boosting, boost_until = _boost_timeout(stdscr, boosting, boost_until)
@@ -2191,11 +2208,7 @@ def screen_processes(stdscr, interval):
             last = now
             rows = process_table()
             rows.sort(key=get_sort_key, reverse=True)
-            if search_term:
-                filtered_rows = [r for r in rows if re.search(search_term, r[10], re.IGNORECASE)]
-                _render_processes(stdscr, filtered_rows, start_idx, sel_idx, sort_col)
-            else:
-                _render_processes(stdscr, rows, start_idx, sel_idx, sort_col)
+            _render_processes(stdscr, rows, start_idx, sel_idx, sort_col)
 
         ch = stdscr.getch()
         if ch == -1: continue
@@ -2223,6 +2236,41 @@ def screen_processes(stdscr, interval):
                         start_idx = 0
                         sel_idx = 0
                         _render_processes(stdscr, rows, start_idx, sel_idx, sort_col)
+        elif ch == ord('s'):
+            search_term = _prompt(stdscr, "Search processes:", "").strip()
+            last_search_idx = -1
+            if search_term:
+                # find first match
+                for i, r in enumerate(rows):
+                    if re.search(search_term, r[10], re.IGNORECASE):
+                        # select this row
+                        max_lines = max(1, stdscr.getmaxyx()[0] - 6)
+                        start_idx = max(0, i - max_lines // 2)
+                        sel_idx = i - start_idx
+                        last_search_idx = i
+                        break
+            _render_processes(stdscr, rows, start_idx, sel_idx, sort_col)
+        elif ch == ord('n'):
+            if search_term:
+                found = False
+                for i in range(last_search_idx + 1, len(rows)):
+                    if re.search(search_term, rows[i][10], re.IGNORECASE):
+                        max_lines = max(1, stdscr.getmaxyx()[0] - 6)
+                        start_idx = max(0, i - max_lines // 2)
+                        sel_idx = i - start_idx
+                        last_search_idx = i
+                        found = True
+                        break
+                if not found:
+                    # wrap around
+                    for i in range(last_search_idx + 1):
+                        if re.search(search_term, rows[i][10], re.IGNORECASE):
+                            max_lines = max(1, stdscr.getmaxyx()[0] - 6)
+                            start_idx = max(0, i - max_lines // 2)
+                            sel_idx = i - start_idx
+                            last_search_idx = i
+                            break
+            _render_processes(stdscr, rows, start_idx, sel_idx, sort_col)
         elif ch in (curses.KEY_UP, ord('k')):
             if sel_idx > 0:
                 sel_idx -= 1
