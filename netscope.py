@@ -28,7 +28,37 @@ except Exception:
     psutil = None  # type: ignore
     PSUTIL_OK = False
 
-VERSION = "2.0.11"
+# -----------------------------------------------------------------------------
+# Ignore List
+# -----------------------------------------------------------------------------
+CONFIG_DIR = Path.home() / ".config" / "netscope"
+IGNORE_FILE = CONFIG_DIR / "ignore.json"
+IGNORED_PROCESSES = set()
+
+def load_ignored_processes():
+    global IGNORED_PROCESSES
+    if not IGNORE_FILE.exists():
+        IGNORED_PROCESSES = set()
+        return
+    try:
+        with IGNORE_FILE.open("r") as f:
+            data = json.load(f)
+            if isinstance(data, list):
+                IGNORED_PROCESSES = set(data)
+            else:
+                IGNORED_PROCESSES = set()
+    except (IOError, json.JSONDecodeError):
+        IGNORED_PROCESSES = set()
+
+def save_ignored_processes():
+    try:
+        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        with IGNORE_FILE.open("w") as f:
+            json.dump(list(sorted(IGNORED_PROCESSES)), f, indent=2)
+    except IOError:
+        pass # Ignore if we can't write the file
+
+VERSION = "2.0.12"
 
 # -----------------------------------------------------------------------------
 # Performance knobs
@@ -662,9 +692,15 @@ def _snapshot_connections(tick):
                 status = c.status
                 if status not in ("ESTABLISHED", "LISTEN"):
                     continue
+                
+                pid = int(c.pid) if c.pid else 0
+                if pid:
+                    name, _ = _proc_meta(pid, tick)
+                    if name in IGNORED_PROCESSES:
+                        continue
+
                 laddr = f"{compress_ipv6(c.laddr.ip)}:{c.laddr.port}" if c.laddr else "N/A"
                 raddr = f"{compress_ipv6(c.raddr.ip)}:{c.raddr.port}" if c.raddr else "N/A"
-                pid = int(c.pid) if c.pid else 0
                 row = (laddr, raddr, "ESTABLISHED" if status == "ESTABLISHED" else "LISTEN", pid)
                 if status == "ESTABLISHED":
                     est.append(row)
@@ -1522,9 +1558,9 @@ def screen_splash(stdscr):
         h, w = stdscr.getmaxyx()
 
     title = "NetScope"
-    menu = ["1. System Info", "2. Established Connections", "3. Listening Connections", "4. Both", "5. Running Processes", "6. Exit"]
+    menu = ["1. System Info", "2. Established Connections", "3. Listening Connections", "4. Both", "5. Running Processes", "6. View Ignored Processes", "7. Exit"]
     sel = 0
-    menu_colors = [2,5,6,7,8,9]
+    menu_colors = [2,5,6,7,8,9,5]
 
     def draw_menu():
         stdscr.erase()
@@ -1560,9 +1596,20 @@ def screen_splash(stdscr):
             theme_dialog(stdscr); stdscr.clear(); THEME.apply(stdscr); draw_menu(); continue
         if ch in (curses.KEY_UP, ord('k')): sel = (sel - 1) % len(menu); draw_menu()
         elif ch in (curses.KEY_DOWN, ord('j')): sel = (sel + 1) % len(menu); draw_menu()
-        elif ch in (10, 13, curses.KEY_ENTER): return sel + 1
-        elif ch in (ord('1'), ord('2'), ord('3'), ord('4'), ord('5'), ord('6')): return int(chr(ch))
-        elif ch in (ord('q'), 27): return 6
+        elif ch in (10, 13, curses.KEY_ENTER): 
+            if sel == 5:
+                screen_ignored_list(stdscr)
+                draw_menu()
+                continue
+            return sel + 1 if sel < 6 else 6 # Adjust exit option
+        elif ch in (ord('1'), ord('2'), ord('3'), ord('4'), ord('5')):
+            return int(chr(ch))
+        elif ch == ord('6'):
+            screen_ignored_list(stdscr)
+            draw_menu()
+            continue
+        elif ch in (ord('q'), 27, ord('7')):
+             return 6
 
 # System Info
 def screen_system_info(stdscr, interval):
@@ -1751,12 +1798,13 @@ def _render_system_info_optimized(stdscr, logo_data, info_lines):
 def screen_connections(stdscr, interval, mode):
     stdscr.timeout(IDLE_MS)
     start_idx = 0
+    sel_idx = 0
     boosting = False
     boost_until = 0.0
 
     tick = (_conn_tick + 1) if _conn_tick >= 0 else 1
     rows = list_connections("ESTABLISHED" if mode == "Established" else "LISTEN", tick)
-    _render_connections(stdscr, rows, start_idx, mode, tick)
+    _render_connections(stdscr, rows, start_idx, sel_idx, mode, tick)
     last = time.time()
 
     while True:
@@ -1765,33 +1813,60 @@ def screen_connections(stdscr, interval, mode):
         if now - last >= interval:
             last = now; tick += 1
             rows = list_connections("ESTABLISHED" if mode == "Established" else "LISTEN", tick)
-            _render_connections(stdscr, rows, start_idx, mode, tick)
+            _render_connections(stdscr, rows, start_idx, sel_idx, mode, tick)
 
         ch = stdscr.getch()
         if ch == -1: continue
         if ch in (curses.KEY_BACKSPACE, curses.KEY_LEFT, 127): return
         if ch in (ord('q'), 27): raise SystemExit
-        if ch == ord('t'): theme_dialog(stdscr); last = 0; _render_connections(stdscr, rows, start_idx, mode, tick)
-        elif ch in (curses.KEY_UP,):
-            start_idx = max(0, start_idx - 1)
-            _render_connections(stdscr, rows, start_idx, mode, tick)
+        if ch == ord('t'): 
+            theme_dialog(stdscr); 
+            last = 0; 
+            _render_connections(stdscr, rows, start_idx, sel_idx, mode, tick)
+        elif ch == ord('l'):
+            screen_ignored_list(stdscr)
+            rows = list_connections("ESTABLISHED" if mode == "Established" else "LISTEN", tick)
+            _render_connections(stdscr, rows, start_idx, sel_idx, mode, tick)
+        elif ch == ord('i'):
+            if rows:
+                current_selection = start_idx + sel_idx
+                if current_selection < len(rows):
+                    pid_to_ignore = rows[current_selection][3]
+                    if pid_to_ignore and pid_to_ignore != "N/A":
+                        name, _ = _proc_meta(int(pid_to_ignore), tick)
+                        if name and name != "N/A":
+                            IGNORED_PROCESSES.add(name)
+                            save_ignored_processes()
+                            rows = list_connections("ESTABLISHED" if mode == "Established" else "LISTEN", tick)
+                            _render_connections(stdscr, rows, start_idx, sel_idx, mode, tick)
+        elif ch in (curses.KEY_UP, ord('k')):
+            if sel_idx > 0:
+                sel_idx -= 1
+            elif start_idx > 0:
+                start_idx -= 1
+            _render_connections(stdscr, rows, start_idx, sel_idx, mode, tick)
             stdscr.timeout(SCROLL_MS); boosting = True; boost_until = time.time() + (SCROLL_BOOST_MS/1000.0)
         elif ch in (curses.KEY_DOWN, ord('j')):
             max_lines = max(1, stdscr.getmaxyx()[0] - 6)
-            start_idx = min(max(0, len(rows) - max_lines), start_idx + 1)
-            _render_connections(stdscr, rows, start_idx, mode, tick)
+            if sel_idx < max_lines - 1 and sel_idx < len(rows) - 1 - start_idx:
+                sel_idx += 1
+            elif start_idx + max_lines < len(rows):
+                start_idx += 1
+            _render_connections(stdscr, rows, start_idx, sel_idx, mode, tick)
             stdscr.timeout(SCROLL_MS); boosting = True; boost_until = time.time() + (SCROLL_BOOST_MS/1000.0)
         elif ch == ord('?'):
             _popup_help(stdscr, [
                 " Established/Listening Connections ",
                 "",
                 " Up/Down        : scroll",
+                " i              : ignore selected process",
+                " l              : list ignored processes",
                 " t              : theme dialog",
                 " Backspace/Left : back to menu",
                 " q              : quit",
             ])
 
-def _render_connections(stdscr, rows, start_idx, mode, tick):
+def _render_connections(stdscr, rows, start_idx, sel_idx, mode, tick):
     stdscr.erase()
     stdscr.bkgd(curses.color_pair(1))
     border_title(stdscr, f"{mode} Connections (Backspace/Left = Back, t = Theme, q = Quit)")
@@ -1803,8 +1878,59 @@ def _render_connections(stdscr, rows, start_idx, mode, tick):
     visible = rows[start_idx:start_idx+max_lines]
     for i, base_row in enumerate(visible):
         vals = _format_conn_row(base_row, tick)
-        draw_table_row(stdscr, y+2+i, x, vals, CONN_COLS, CONN_COLORS, sep=" ", selected=False)
+        draw_table_row(stdscr, y+2+i, x, vals, CONN_COLS, CONN_COLORS, sep=" ", selected=(i == sel_idx))
     stdscr.refresh()
+
+def screen_ignored_list(stdscr):
+    stdscr.timeout(IDLE_MS)
+    start_idx = 0
+    sel_idx = 0
+    
+    while True:
+        ignored_list = sorted(list(IGNORED_PROCESSES))
+        stdscr.erase()
+        stdscr.bkgd(curses.color_pair(1))
+        border_title(stdscr, "Ignored Processes (Up/Down = Scroll, u = Unignore, Back/Left = Back, q = Quit)")
+        h, w = stdscr.getmaxyx()
+        y = 2
+        x = 2
+        max_lines = h - 4
+
+        if not ignored_list:
+            stdscr.addstr(y, x, "No processes are being ignored.", curses.color_pair(1))
+        else:
+            for i, item in enumerate(ignored_list[start_idx:start_idx+max_lines]):
+                attr = curses.color_pair(1)
+                if i == sel_idx:
+                    attr |= curses.A_REVERSE
+                stdscr.addstr(y + i, x, item, attr)
+
+        stdscr.refresh()
+
+        ch = stdscr.getch()
+        if ch in (curses.KEY_BACKSPACE, curses.KEY_LEFT, 127):
+            return
+        if ch in (ord('q'), 27):
+            raise SystemExit
+        elif ch in (curses.KEY_UP, ord('k')):
+            if sel_idx > 0:
+                sel_idx -= 1
+            elif start_idx > 0:
+                start_idx -= 1
+        elif ch in (curses.KEY_DOWN, ord('j')):
+            if sel_idx < max_lines - 1 and sel_idx < len(ignored_list) - 1 - start_idx:
+                sel_idx += 1
+            elif start_idx + max_lines < len(ignored_list):
+                start_idx += 1
+        elif ch == ord('u'):
+            if ignored_list:
+                current_selection_index = start_idx + sel_idx
+                if current_selection_index < len(ignored_list):
+                    item_to_remove = ignored_list[current_selection_index]
+                    IGNORED_PROCESSES.remove(item_to_remove)
+                    save_ignored_processes()
+                    if sel_idx >= len(ignored_list) - 1 - start_idx:
+                         sel_idx = max(0, len(ignored_list) - start_idx -1)
 
 # Both panes
 def screen_both(stdscr, interval):
@@ -1816,6 +1942,7 @@ def screen_both(stdscr, interval):
     snap = _snapshot_connections(tick)
     est_rows = snap["EST"]; lis_rows = snap["LIS"]
     est_idx = 0; lis_idx = 0
+    est_sel_idx = 0; lis_sel_idx = 0
     active = "EST"
     last = time.time()
 
@@ -1846,7 +1973,7 @@ def screen_both(stdscr, interval):
         max_est = max(0, top.getmaxyx()[0] - (y + 3))
         for i, base_row in enumerate(est_rows[est_idx:est_idx+max_est]):
             vals = _format_conn_row(base_row, tick)
-            draw_table_row(top, y+2+i, x, vals, CONN_COLS, CONN_COLORS, sep=" ", selected=False)
+            draw_table_row(top, y+2+i, x, vals, CONN_COLS, CONN_COLORS, sep=" ", selected=(active == "EST" and i == est_sel_idx))
         top.noutrefresh()
 
         bottom.erase()
@@ -1857,7 +1984,7 @@ def screen_both(stdscr, interval):
         max_lis = max(0, bottom.getmaxyx()[0] - (y + 3))
         for i, base_row in enumerate(lis_rows[lis_idx:lis_idx+max_lis]):
             vals = _format_conn_row(base_row, tick)
-            draw_table_row(bottom, y+2+i, x, vals, CONN_COLS, CONN_COLORS, sep=" ", selected=False)
+            draw_table_row(bottom, y+2+i, x, vals, CONN_COLS, CONN_COLORS, sep=" ", selected=(active == "LIS" and i == lis_sel_idx))
         bottom.noutrefresh()
         curses.doupdate()
 
@@ -1881,19 +2008,69 @@ def screen_both(stdscr, interval):
         if ch == -1: continue
         if ch in (curses.KEY_BACKSPACE, curses.KEY_LEFT, 127): return
         if ch in (ord('q'), 27): raise SystemExit
-        if ch == ord('t'): theme_dialog(stdscr); last = 0; layout(); render()
-        elif ch == ord('\t'): active = "LIS" if active == "EST" else "EST"; render()
-        elif ch in (curses.KEY_UP,):
-            if active == "EST": est_idx = max(0, est_idx - 1)
-            else: lis_idx = max(0, lis_idx - 1)
+        if ch == ord('t'): 
+            theme_dialog(stdscr); 
+            last = 0; 
+            layout(); 
+            render()
+        elif ch == ord('l'):
+            screen_ignored_list(stdscr)
+            snap = _snapshot_connections(tick)
+            est_rows = snap["EST"]; lis_rows = snap["LIS"]
+            render()
+        elif ch == ord('i'):
+            if active == "EST" and est_rows:
+                current_selection = est_idx + est_sel_idx
+                if current_selection < len(est_rows):
+                    pid_to_ignore = est_rows[current_selection][3]
+                    if pid_to_ignore and pid_to_ignore != "N/A":
+                        name, _ = _proc_meta(int(pid_to_ignore), tick)
+                        if name and name != "N/A":
+                            IGNORED_PROCESSES.add(name)
+                            save_ignored_processes()
+                            snap = _snapshot_connections(tick)
+                            est_rows = snap["EST"]; lis_rows = snap["LIS"]
+                            render()
+            elif active == "LIS" and lis_rows:
+                current_selection = lis_idx + lis_sel_idx
+                if current_selection < len(lis_rows):
+                    pid_to_ignore = lis_rows[current_selection][3]
+                    if pid_to_ignore and pid_to_ignore != "N/A":
+                        name, _ = _proc_meta(int(pid_to_ignore), tick)
+                        if name and name != "N/A":
+                            IGNORED_PROCESSES.add(name)
+                            save_ignored_processes()
+                            snap = _snapshot_connections(tick)
+                            est_rows = snap["EST"]; lis_rows = snap["LIS"]
+                            render()
+        elif ch == ord('\t'): 
+            active = "LIS" if active == "EST" else "EST"; 
+            render()
+        elif ch in (curses.KEY_UP, ord('k')):
+            if active == "EST":
+                if est_sel_idx > 0:
+                    est_sel_idx -= 1
+                elif est_idx > 0:
+                    est_idx -= 1
+            else:
+                if lis_sel_idx > 0:
+                    lis_sel_idx -= 1
+                elif lis_idx > 0:
+                    lis_idx -= 1
             render(); stdscr.timeout(SCROLL_MS); boosting = True; boost_until = time.time() + (SCROLL_BOOST_MS/1000.0)
-        elif ch in (curses.KEY_DOWN,):
+        elif ch in (curses.KEY_DOWN, ord('j')):
             if active == "EST":
                 max_est = max(0, top.getmaxyx()[0] - 5)
-                est_idx = min(max(0, len(est_rows) - max_est), est_idx + 1)
+                if est_sel_idx < max_est - 1 and est_sel_idx < len(est_rows) - 1 - est_idx:
+                    est_sel_idx += 1
+                elif est_idx + max_est < len(est_rows):
+                    est_idx += 1
             else:
                 max_lis = max(0, bottom.getmaxyx()[0] - 5)
-                lis_idx = min(max(0, len(lis_rows) - max_lis), lis_idx + 1)
+                if lis_sel_idx < max_lis - 1 and lis_sel_idx < len(lis_rows) - 1 - lis_idx:
+                    lis_sel_idx += 1
+                elif lis_idx + max_lis < len(lis_rows):
+                    lis_idx += 1
             render(); stdscr.timeout(SCROLL_MS); boosting = True; boost_until = time.time() + (SCROLL_BOOST_MS/1000.0)
 
 # Help popup
@@ -1958,6 +2135,8 @@ def process_table():
     for proc in psutil.process_iter(["pid","username","nice","memory_info","status","cpu_percent","memory_percent","name","create_time"]):  # type: ignore[attr-defined]
         try:
             p = proc.info
+            if p.get("name", "N/A") in IGNORED_PROCESSES:
+                continue
             up = time.time() - p["create_time"]
             m, s = divmod(int(up), 60); h, m = divmod(m, 60)
             tstr = f"{h:02}:{m:02}:{s:02}"
@@ -1998,6 +2177,98 @@ def screen_processes(stdscr, interval):
             except: return 0
         else:
             return row[0]
+
+    rows = process_table()
+    rows.sort(key=get_sort_key, reverse=True)
+    _render_processes(stdscr, rows, start_idx, sel_idx, sort_col)
+    last = time.time()
+    search_term = None
+
+    while True:
+        boosting, boost_until = _boost_timeout(stdscr, boosting, boost_until)
+        now = time.time()
+        if now - last >= interval:
+            last = now
+            rows = process_table()
+            rows.sort(key=get_sort_key, reverse=True)
+            if search_term:
+                filtered_rows = [r for r in rows if re.search(search_term, r[10], re.IGNORECASE)]
+                _render_processes(stdscr, filtered_rows, start_idx, sel_idx, sort_col)
+            else:
+                _render_processes(stdscr, rows, start_idx, sel_idx, sort_col)
+
+        ch = stdscr.getch()
+        if ch == -1: continue
+        if ch in (curses.KEY_BACKSPACE, curses.KEY_LEFT, 127): return
+        if ch in (ord('q'), 27): raise SystemExit
+        if ch == ord('t'): 
+            theme_dialog(stdscr); 
+            last = 0; 
+            _render_processes(stdscr, rows, start_idx, sel_idx, sort_col)
+        elif ch == ord('l'):
+            screen_ignored_list(stdscr)
+            rows = process_table()
+            rows.sort(key=get_sort_key, reverse=True)
+            _render_processes(stdscr, rows, start_idx, sel_idx, sort_col)
+        elif ch == ord('i'):
+            if rows:
+                current_selection = start_idx + sel_idx
+                if current_selection < len(rows):
+                    name_to_ignore = rows[current_selection][10]
+                    if name_to_ignore and name_to_ignore != "N/A":
+                        IGNORED_PROCESSES.add(name_to_ignore)
+                        save_ignored_processes()
+                        rows = process_table()
+                        rows.sort(key=get_sort_key, reverse=True)
+                        start_idx = 0
+                        sel_idx = 0
+                        _render_processes(stdscr, rows, start_idx, sel_idx, sort_col)
+        elif ch in (curses.KEY_UP, ord('k')):
+            if sel_idx > 0:
+                sel_idx -= 1
+            elif start_idx > 0:
+                start_idx -= 1
+            _render_processes(stdscr, rows, start_idx, sel_idx, sort_col)
+            stdscr.timeout(SCROLL_MS); boosting = True; boost_until = time.time() + (SCROLL_BOOST_MS/1000.0)
+        elif ch in (curses.KEY_DOWN, ord('j')):
+            max_lines = max(1, stdscr.getmaxyx()[0] - 6)
+            if sel_idx < max_lines - 1 and sel_idx < len(rows) - 1 - start_idx:
+                sel_idx += 1
+            elif start_idx + max_lines < len(rows):
+                start_idx += 1
+            _render_processes(stdscr, rows, start_idx, sel_idx, sort_col)
+            stdscr.timeout(SCROLL_MS); boosting = True; boost_until = time.time() + (SCROLL_BOOST_MS/1000.0)
+        elif ch == ord('c') or ch == ord('m') or ch == ord('p'):
+            sort_col = {ord('c'): "cpu", ord('m'): "mem", ord('p'): "pid"}.get(ch, "cpu")
+            rows.sort(key=get_sort_key, reverse=True)
+            _render_processes(stdscr, rows, start_idx, sel_idx, sort_col)
+        elif ch == ord('k'):
+            if rows:
+                current_selection = start_idx + sel_idx
+                if current_selection < len(rows):
+                    pid = rows[current_selection][0]
+                    name = rows[current_selection][10]
+                    if confirm_kill(stdscr, name, pid):
+                        try:
+                            os.kill(int(pid), 15)
+                        except Exception:
+                            pass
+                        last = 0
+        elif ch == ord('?'):
+            _popup_help(stdscr, [
+                " Running Processes ",
+                "",
+                " Up/Down        : scroll",
+                " k              : kill selected process",
+                " i              : ignore selected process",
+                " l              : list ignored processes",
+                " s              : search processes",
+                " n              : next search match",
+                " c/m/p          : sort by cpu/mem/pid",
+                " t              : theme dialog",
+                " Backspace/Left : back to menu",
+                " q              : quit",
+            ])
 
     rows = process_table()
     rows.sort(key=get_sort_key, reverse=True)
@@ -2203,6 +2474,7 @@ def run(stdscr, interval, initial_theme):
         elif sel == 6: break
 
 def main():
+    load_ignored_processes()
     parser = argparse.ArgumentParser(add_help=False, description=f"NetScope {VERSION}")
     parser.add_argument("-d", type=int, default=3, help="Update interval in seconds (default 3)")
     parser.add_argument("-t", "--theme", default="blue", help="Theme name from /etc/netscope/themes (default blue)")

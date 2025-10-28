@@ -1,4 +1,4 @@
-# NetScope 2.0.11
+# NetScope 2.0.12
 
 NetScope is a powerful network and process monitoring tool inspired by htop and netstat. It lets you inspect established and listening connections, browse running processes, and interact with them in a fast, keyboard-friendly UI. New in this release: a theming system with truecolor backgrounds (OSC 11) when supported, automatic 256-color/16-color fallbacks, and runtime theme switching (t). Themes can be supplied as JSON in /etc/netscope/themes/*.json; the default blue theme remains available out of the box.
 
@@ -85,24 +85,34 @@ netscope -v     # Display version information
 Up/Down Arrows or k/j: Navigate through lists and menu options.
 Enter or Return: Select a menu option.
 Left Arrow or Backspace: Return to the main menu from sub-screens.
+l: View the list of ignored processes.
 q: Quit the application from any screen.
 ?: Show context-specific help menus with key bindings and instructions.
 
-Established and Listening Connections Screens
+# Ignored Processes Screen
+Up/Down Arrows or k/j: Scroll through the list of ignored processes.
+u: Unignore the selected process.
+Left Arrow or Backspace: Return to the previous menu.
+q: Quit the application.
+
+# Established and Listening Connections Screens
 Up/Down Arrows or k/j: Scroll through the list of connections.
+i: Ignore the selected connection's process.
 Left Arrow or Backspace: Return to the main menu.
 q: Quit the application.
 
-Both Connections Screen
+# Both Connections Screen
 Tab: Switch between Established and Listening sections.
 Up/Down Arrows or k/j: Scroll through the connections in the active section.
+i: Ignore the selected connection's process.
 Left Arrow or Backspace: Return to the main menu.
 ?: Show help menu with key bindings.
 q: Quit the application.
 
-Running Processes Screen
+# Running Processes Screen
 Up/Down Arrows or k/j: Scroll through the list of processes.
 k: Kill the selected process (with confirmation prompt).
+i: Ignore the selected process.
 s: Search for a process using wildcards (e.g., *python*).
 n: Find the next match for the search term.
 c: Sort processes by CPU usage (descending).
