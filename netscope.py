@@ -1646,9 +1646,10 @@ def screen_system_info(stdscr, interval):
             continue
         if ch in (curses.KEY_BACKSPACE, curses.KEY_LEFT, 127): 
             return
-                if ch in (ord('q'), 27):
-                    return
-                if ch == ord('t'):            theme_dialog(stdscr)
+        if ch in (ord('q'), 27):
+            return
+        if ch == ord('t'):
+            theme_dialog(stdscr)
             # Refresh system cache when theme changes
             global _SYSTEM_INFO_CACHE
             _SYSTEM_INFO_CACHE = None
