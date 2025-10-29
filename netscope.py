@@ -58,7 +58,31 @@ def save_ignored_processes():
     except IOError:
         pass # Ignore if we can't write the file
 
-VERSION = "2.0.12"
+VERSION = "2.0.13"
+
+class ConfigManager:
+    def __init__(self):
+        self.config_path = Path("/etc/netscope/netscope.json")
+        self.defaults = {
+            "theme": "blue",
+            "update_interval": 3,
+            "proc_sort_col": "cpu",
+        }
+        self.config = self.defaults.copy()
+
+    def load_config(self):
+        if self.config_path.exists():
+            try:
+                with self.config_path.open("r") as f:
+                    user_config = json.load(f)
+                self.config.update(user_config)
+            except (IOError, json.JSONDecodeError):
+                pass # Use defaults if file is invalid
+
+    def get(self, key):
+        return self.config.get(key, self.defaults.get(key))
+
+CONFIG = ConfigManager()
 
 # -----------------------------------------------------------------------------
 # Performance knobs
@@ -66,7 +90,7 @@ VERSION = "2.0.12"
 IDLE_MS = 80
 SCROLL_BOOST_MS = 250
 SCROLL_MS = 15
-PROC_SORT_DEFAULT = "cpu"
+PROC_SORT_DEFAULT = CONFIG.get('proc_sort_col')
 CONN_KIND = os.environ.get("NETSCOPE_CONN_KIND", "tcp")
 
 # -----------------------------------------------------------------------------
@@ -87,11 +111,11 @@ def _osc_set_default_bg(hex_color: str):
     except Exception:
         pass
 
-def _osc_reset_default_bg():
-    try:
-        os.write(sys.stdout.fileno(), b"\x1b]111\x07")
-    except Exception:
-        pass
+
+
+
+
+
 
 class ThemeManager:
     def __init__(self):
@@ -186,7 +210,14 @@ class ThemeManager:
         return accents
 
     def _on_exit_reset_bg(self):
-        _osc_reset_default_bg()
+        ThemeManager._osc_reset_default_bg()
+
+    @staticmethod
+    def _osc_reset_default_bg():
+        try:
+            os.write(sys.stdout.fileno(), b"\x1b]111\x07")
+        except Exception:
+            pass
 
     def apply(self, stdscr, name=None):
         curses.start_color()
@@ -209,7 +240,7 @@ class ThemeManager:
                 curses.init_pair(pid, fgcol, bgcol)
 
         if name == "blue":
-            _osc_reset_default_bg()
+            ThemeManager._osc_reset_default_bg()
             for pid in (1,2,4,5,6,7,8,9):
                 curses.init_pair(pid, curses.COLOR_WHITE, curses.COLOR_BLUE)
         else:
@@ -1481,11 +1512,15 @@ def draw_hline(win, y, x, width):
     except curses.error:
         pass
 
-def draw_table_header(win, y, x, cols, col_colors, sep=" "):
+def draw_table_header(win, y, x, cols, col_colors, sep=" ", sort_col=None, sort_reverse=None):
     cx = x
+    sort_map = {"pid": "PID", "user": "USER", "cpu": "CPU%", "mem": "MEM%"}
     for i, (hdr, w, _align) in enumerate(cols):
         color = curses.color_pair(col_colors[i % len(col_colors)]) | curses.A_BOLD
-        try: win.addstr(y, cx, _pad(hdr, w), color)
+        hdr_str = hdr
+        if sort_col and hdr == sort_map.get(sort_col):
+            hdr_str += " " + ("▼" if sort_reverse else "▲")
+        try: win.addstr(y, cx, _pad(hdr_str, w), color)
         except curses.error: pass
         cx += w
         if i < len(cols)-1:
@@ -1558,7 +1593,7 @@ def screen_splash(stdscr):
         h, w = stdscr.getmaxyx()
 
     title = "NetScope"
-    menu = ["1. System Info", "2. Established Connections", "3. Listening Connections", "4. Both", "5. Running Processes", "6. View Ignored Processes", "7. Exit"]
+    menu = ["1. System Info", "2. Established Connections", "3. Listening Connections", "4. Both", "5. Running Processes", "6. Network Stats", "7. Exit"]
     sel = 0
     menu_colors = [2,5,6,7,8,9,5]
 
@@ -1596,20 +1631,12 @@ def screen_splash(stdscr):
             theme_dialog(stdscr); stdscr.clear(); THEME.apply(stdscr); draw_menu(); continue
         if ch in (curses.KEY_UP, ord('k')): sel = (sel - 1) % len(menu); draw_menu()
         elif ch in (curses.KEY_DOWN, ord('j')): sel = (sel + 1) % len(menu); draw_menu()
-        elif ch in (10, 13, curses.KEY_ENTER): 
-            if sel == 5:
-                screen_ignored_list(stdscr)
-                draw_menu()
-                continue
-            return sel + 1 if sel < 6 else 6 # Adjust exit option
-        elif ch in (ord('1'), ord('2'), ord('3'), ord('4'), ord('5')):
-            return int(chr(ch))
-        elif ch == ord('6'):
-            screen_ignored_list(stdscr)
-            draw_menu()
-            continue
+        elif ch in (10, 13, curses.KEY_ENTER):
+            return sel + 1
         elif ch in (ord('q'), 27, ord('7')):
-             return 6
+             return 7
+        elif ch in (ord('1'), ord('2'), ord('3'), ord('4'), ord('5'), ord('6')):
+            return int(chr(ch))
 
 # System Info
 def screen_system_info(stdscr, interval):
@@ -1803,16 +1830,63 @@ def _render_system_info_optimized(stdscr, logo_data, info_lines):
     stdscr.refresh()
 
 # Connections
+def _popup_conn_details(stdscr, base_row, tick):
+    h, w = stdscr.getmaxyx()
+    laddr, raddr, status, pid = base_row
+
+    lines = [f" Connection Details "]
+    lines.append("")
+    lines.append(f"  Local: {laddr}")
+    lines.append(f"  Remote: {raddr}")
+    lines.append(f"  Status: {status}")
+    lines.append("")
+
+    if pid and PSUTIL_OK:
+        try:
+            proc = psutil.Process(pid)
+            pinfo = proc.as_dict(attrs=['name', 'username', 'cmdline', 'create_time'])
+            lines.append(f" Process Info (PID: {pid}) ")
+            lines.append("")
+            lines.append(f"  Name: {pinfo['name']}")
+            lines.append(f"  User: {pinfo['username']}")
+            lines.append(f"  Started: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(pinfo['create_time']))}")
+            
+            cmd_line = ' '.join(pinfo['cmdline'])
+            # Wrap command line. Leave margin for popup.
+            max_width = w - 12
+            if max_width > 20:
+                wrapped_lines = textwrap.wrap(
+                    f"  Command: {cmd_line}",
+                    width=max_width,
+                    subsequent_indent="           " # 11 spaces
+                )
+                lines.extend(wrapped_lines)
+            else:
+                lines.append(f"  Command: {cmd_line}")
+
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            lines.append("  Could not retrieve process info.")
+    elif pid:
+        lines.append("  Process info not available (psutil missing?)")
+
+    _popup_help(stdscr, lines)
+
 def screen_connections(stdscr, interval, mode):
     stdscr.timeout(IDLE_MS)
     start_idx = 0
     sel_idx = 0
     boosting = False
     boost_until = 0.0
+    search_term = None
 
     tick = (_conn_tick + 1) if _conn_tick >= 0 else 1
-    rows = list_connections("ESTABLISHED" if mode == "Established" else "LISTEN", tick)
-    _render_connections(stdscr, rows, start_idx, sel_idx, mode, tick)
+    all_rows = list_connections("ESTABLISHED" if mode == "Established" else "LISTEN", tick)
+    formatted_rows = [_format_conn_row(r, tick) for r in all_rows]
+    rows = formatted_rows
+    if search_term:
+        rows = [r for r in formatted_rows if search_term.lower() in r[0].lower() or search_term.lower() in r[1].lower() or search_term.lower() in r[4].lower()]
+
+    _render_connections(stdscr, rows, start_idx, sel_idx, mode, search_term)
     last = time.time()
 
     while True:
@@ -1820,21 +1894,31 @@ def screen_connections(stdscr, interval, mode):
         now = time.time()
         if now - last >= interval:
             last = now; tick += 1
-            rows = list_connections("ESTABLISHED" if mode == "Established" else "LISTEN", tick)
-            _render_connections(stdscr, rows, start_idx, sel_idx, mode, tick)
+            all_rows = list_connections("ESTABLISHED" if mode == "Established" else "LISTEN", tick)
+            formatted_rows = [_format_conn_row(r, tick) for r in all_rows]
+            rows = formatted_rows
+            if search_term:
+                rows = [r for r in formatted_rows if search_term.lower() in r[0].lower() or search_term.lower() in r[1].lower() or search_term.lower() in r[4].lower()]
+            
+        _render_connections(stdscr, rows, start_idx, sel_idx, mode, search_term)
 
         ch = stdscr.getch()
         if ch == -1: continue
         if ch in (curses.KEY_BACKSPACE, curses.KEY_LEFT, 127): return
         if ch in (ord('q'), 27): return
-        if ch == ord('t'): 
-            theme_dialog(stdscr); 
-            last = 0; 
-            _render_connections(stdscr, rows, start_idx, sel_idx, mode, tick)
+        if ch == ord('t'):
+            theme_dialog(stdscr)
+            last = 0
         elif ch == ord('l'):
             screen_ignored_list(stdscr)
-            rows = list_connections("ESTABLISHED" if mode == "Established" else "LISTEN", tick)
-            _render_connections(stdscr, rows, start_idx, sel_idx, mode, tick)
+            last = 0
+        elif ch == ord('s'):
+            search_term = _prompt(stdscr, "Filter connections:", "").strip()
+            rows = formatted_rows
+            if search_term:
+                rows = [r for r in formatted_rows if search_term.lower() in r[0].lower() or search_term.lower() in r[1].lower() or search_term.lower() in r[4].lower()]
+            start_idx = 0
+            sel_idx = 0
         elif ch == ord('i'):
             if rows:
                 current_selection = start_idx + sel_idx
@@ -1845,14 +1929,12 @@ def screen_connections(stdscr, interval, mode):
                         if name and name != "N/A":
                             IGNORED_PROCESSES.add(name)
                             save_ignored_processes()
-                            rows = list_connections("ESTABLISHED" if mode == "Established" else "LISTEN", tick)
-                            _render_connections(stdscr, rows, start_idx, sel_idx, mode, tick)
+                            last = 0 # force refresh
         elif ch in (curses.KEY_UP, ord('k')):
             if sel_idx > 0:
                 sel_idx -= 1
             elif start_idx > 0:
                 start_idx -= 1
-            _render_connections(stdscr, rows, start_idx, sel_idx, mode, tick)
             stdscr.timeout(SCROLL_MS); boosting = True; boost_until = time.time() + (SCROLL_BOOST_MS/1000.0)
         elif ch in (curses.KEY_DOWN, ord('j')):
             max_lines = max(1, stdscr.getmaxyx()[0] - 6)
@@ -1860,13 +1942,27 @@ def screen_connections(stdscr, interval, mode):
                 sel_idx += 1
             elif start_idx + max_lines < len(rows):
                 start_idx += 1
-            _render_connections(stdscr, rows, start_idx, sel_idx, mode, tick)
             stdscr.timeout(SCROLL_MS); boosting = True; boost_until = time.time() + (SCROLL_BOOST_MS/1000.0)
+        elif ch in (10, 13, curses.KEY_ENTER):
+            if rows:
+                current_selection = start_idx + sel_idx
+                if current_selection < len(rows):
+                    # Find original base_row to pass to popup
+                    laddr = rows[current_selection][0]
+                    pid = rows[current_selection][3]
+                    original_row = None
+                    for r in all_rows:
+                        if r[0] == laddr and str(r[3]) == pid:
+                            original_row = r
+                            break
+                    if original_row:
+                        _popup_conn_details(stdscr, original_row, tick)
         elif ch == ord('?'):
             _popup_help(stdscr, [
                 " Established/Listening Connections ",
                 "",
                 " Up/Down        : scroll",
+                " s              : filter connections",
                 " i              : ignore selected process",
                 " l              : list ignored processes",
                 " t              : theme dialog",
@@ -1874,19 +1970,34 @@ def screen_connections(stdscr, interval, mode):
                 " q              : quit",
             ])
 
-def _render_connections(stdscr, rows, start_idx, sel_idx, mode, tick):
+            _popup_help(stdscr, [
+                " Established/Listening Connections ",
+                "",
+                " Up/Down        : scroll",
+                " s              : filter connections",
+                " i              : ignore selected process",
+                " l              : list ignored processes",
+                " t              : theme dialog",
+                " Backspace/Left : back to menu",
+                " q              : quit",
+            ])
+
+def _render_connections(stdscr, rows, start_idx, sel_idx, mode, search_term=None):
     stdscr.erase()
     stdscr.bkgd(curses.color_pair(1))
-    border_title(stdscr, f"{mode} Connections (Backspace/Left = Back, t = Theme, q = Quit)")
+    title = f"{mode} Connections"
+    if search_term:
+        title += f" (Filter: {search_term})"
+    title += " (Backspace/Left = Back, t = Theme, q = Quit)"
+    border_title(stdscr, title)
     h, w = stdscr.getmaxyx()
     y = 2; x = 2
     draw_table_header(stdscr, y, x, CONN_COLS, CONN_COLORS, sep=" ")
     draw_hline(stdscr, y+1, 1, w-2)
     max_lines = max(1, h - (y + 3))
     visible = rows[start_idx:start_idx+max_lines]
-    for i, base_row in enumerate(visible):
-        vals = _format_conn_row(base_row, tick)
-        draw_table_row(stdscr, y+2+i, x, vals, CONN_COLS, CONN_COLORS, sep=" ", selected=(i == sel_idx))
+    for i, row in enumerate(visible):
+        draw_table_row(stdscr, y+2+i, x, row, CONN_COLS, CONN_COLORS, sep=" ", selected=(i == sel_idx))
     stdscr.refresh()
 
 def screen_ignored_list(stdscr):
@@ -1944,10 +2055,22 @@ def screen_both(stdscr, interval):
     stdscr.timeout(IDLE_MS)
     boosting = False
     boost_until = 0.0
+    search_term = None
 
     tick = (_conn_tick + 1) if _conn_tick >= 0 else 1
     snap = _snapshot_connections(tick)
-    est_rows = snap["EST"]; lis_rows = snap["LIS"]
+    all_est_rows = snap["EST"]
+    all_lis_rows = snap["LIS"]
+    
+    formatted_est_rows = [_format_conn_row(r, tick) for r in all_est_rows]
+    formatted_lis_rows = [_format_conn_row(r, tick) for r in all_lis_rows]
+
+    est_rows = formatted_est_rows
+    lis_rows = formatted_lis_rows
+    if search_term:
+        est_rows = [r for r in formatted_est_rows if search_term.lower() in r[0].lower() or search_term.lower() in r[1].lower() or search_term.lower() in r[4].lower()]
+        lis_rows = [r for r in formatted_lis_rows if search_term.lower() in r[0].lower() or search_term.lower() in r[1].lower() or search_term.lower() in r[4].lower()]
+
     est_idx = 0; lis_idx = 0
     est_sel_idx = 0; lis_sel_idx = 0
     active = "EST"
@@ -1960,7 +2083,11 @@ def screen_both(stdscr, interval):
         nonlocal top, bottom, layout_key
         stdscr.erase()
         stdscr.bkgd(curses.color_pair(1))
-        border_title(stdscr, "Both Connections (Tab = Switch, t = Theme, Back = Menu, q = Quit)")
+        title = "Both Connections"
+        if search_term:
+            title += f" (Filter: {search_term})"
+        title += " (Tab = Switch, t = Theme, Back = Menu, q = Quit)"
+        border_title(stdscr, title)
         h, w = stdscr.getmaxyx()
         inner_h = h - 2
         inner_w = w - 2
@@ -1978,9 +2105,8 @@ def screen_both(stdscr, interval):
         draw_table_header(top, y, x, CONN_COLS, CONN_COLORS, sep=" ")
         draw_hline(top, y+1, 1, top.getmaxyx()[1]-2)
         max_est = max(0, top.getmaxyx()[0] - (y + 3))
-        for i, base_row in enumerate(est_rows[est_idx:est_idx+max_est]):
-            vals = _format_conn_row(base_row, tick)
-            draw_table_row(top, y+2+i, x, vals, CONN_COLS, CONN_COLORS, sep=" ", selected=(active == "EST" and i == est_sel_idx))
+        for i, row in enumerate(est_rows[est_idx:est_idx+max_est]):
+            draw_table_row(top, y+2+i, x, row, CONN_COLS, CONN_COLORS, sep=" ", selected=(active == "EST" and i == est_sel_idx))
         top.noutrefresh()
 
         bottom.erase()
@@ -1989,9 +2115,8 @@ def screen_both(stdscr, interval):
         draw_table_header(bottom, y, x, CONN_COLS, CONN_COLORS, sep=" ")
         draw_hline(bottom, y+1, 1, bottom.getmaxyx()[1]-2)
         max_lis = max(0, bottom.getmaxyx()[0] - (y + 3))
-        for i, base_row in enumerate(lis_rows[lis_idx:lis_idx+max_lis]):
-            vals = _format_conn_row(base_row, tick)
-            draw_table_row(bottom, y+2+i, x, vals, CONN_COLS, CONN_COLORS, sep=" ", selected=(active == "LIS" and i == lis_sel_idx))
+        for i, row in enumerate(lis_rows[lis_idx:lis_idx+max_lis]):
+            draw_table_row(bottom, y+2+i, x, row, CONN_COLS, CONN_COLORS, sep=" ", selected=(active == "LIS" and i == lis_sel_idx))
         bottom.noutrefresh()
         curses.doupdate()
 
@@ -2008,50 +2133,64 @@ def screen_both(stdscr, interval):
         if now - last >= interval:
             last = now; tick += 1
             snap = _snapshot_connections(tick)
-            est_rows = snap["EST"]; lis_rows = snap["LIS"]
+            all_est_rows = snap["EST"]
+            all_lis_rows = snap["LIS"]
+            formatted_est_rows = [_format_conn_row(r, tick) for r in all_est_rows]
+            formatted_lis_rows = [_format_conn_row(r, tick) for r in all_lis_rows]
+            est_rows = formatted_est_rows
+            lis_rows = formatted_lis_rows
+            if search_term:
+                est_rows = [r for r in formatted_est_rows if search_term.lower() in r[0].lower() or search_term.lower() in r[1].lower() or search_term.lower() in r[4].lower()]
+                lis_rows = [r for r in formatted_lis_rows if search_term.lower() in r[0].lower() or search_term.lower() in r[1].lower() or search_term.lower() in r[4].lower()]
             render()
 
         ch = stdscr.getch()
         if ch == -1: continue
         if ch in (curses.KEY_BACKSPACE, curses.KEY_LEFT, 127): return
         if ch in (ord('q'), 27): return
-        if ch == ord('t'): 
-            theme_dialog(stdscr); 
-            last = 0; 
-            layout(); 
+        if ch == ord('t'):
+            theme_dialog(stdscr)
+            last = 0
+            layout()
             render()
-        elif ch == ord('l'):
-            screen_ignored_list(stdscr)
-            snap = _snapshot_connections(tick)
-            est_rows = snap["EST"]; lis_rows = snap["LIS"]
+        elif ch == ord('s'):
+            search_term = _prompt(stdscr, "Filter connections:", "").strip()
+            est_rows = formatted_est_rows
+            lis_rows = formatted_lis_rows
+            if search_term:
+                est_rows = [r for r in formatted_est_rows if search_term.lower() in r[0].lower() or search_term.lower() in r[1].lower() or search_term.lower() in r[4].lower()]
+                lis_rows = [r for r in formatted_lis_rows if search_term.lower() in r[0].lower() or search_term.lower() in r[1].lower() or search_term.lower() in r[4].lower()]
+            est_idx = 0; lis_idx = 0
+            est_sel_idx = 0; lis_sel_idx = 0
             render()
-        elif ch == ord('i'):
+        elif ch in (10, 13, curses.KEY_ENTER):
             if active == "EST" and est_rows:
                 current_selection = est_idx + est_sel_idx
                 if current_selection < len(est_rows):
-                    pid_to_ignore = est_rows[current_selection][3]
-                    if pid_to_ignore and pid_to_ignore != "N/A":
-                        name, _ = _proc_meta(int(pid_to_ignore), tick)
-                        if name and name != "N/A":
-                            IGNORED_PROCESSES.add(name)
-                            save_ignored_processes()
-                            snap = _snapshot_connections(tick)
-                            est_rows = snap["EST"]; lis_rows = snap["LIS"]
-                            render()
+                    # Find original base_row to pass to popup
+                    laddr = est_rows[current_selection][0]
+                    pid = est_rows[current_selection][3]
+                    original_row = None
+                    for r in all_est_rows:
+                        if r[0] == laddr and str(r[3]) == pid:
+                            original_row = r
+                            break
+                    if original_row:
+                        _popup_conn_details(stdscr, original_row, tick)
             elif active == "LIS" and lis_rows:
                 current_selection = lis_idx + lis_sel_idx
                 if current_selection < len(lis_rows):
-                    pid_to_ignore = lis_rows[current_selection][3]
-                    if pid_to_ignore and pid_to_ignore != "N/A":
-                        name, _ = _proc_meta(int(pid_to_ignore), tick)
-                        if name and name != "N/A":
-                            IGNORED_PROCESSES.add(name)
-                            save_ignored_processes()
-                            snap = _snapshot_connections(tick)
-                            est_rows = snap["EST"]; lis_rows = snap["LIS"]
-                            render()
-        elif ch == ord('\t'): 
-            active = "LIS" if active == "EST" else "EST"; 
+                    laddr = lis_rows[current_selection][0]
+                    pid = lis_rows[current_selection][3]
+                    original_row = None
+                    for r in all_lis_rows:
+                        if r[0] == laddr and str(r[3]) == pid:
+                            original_row = r
+                            break
+                    if original_row:
+                        _popup_conn_details(stdscr, original_row, tick)
+        elif ch == ord('\t'):
+            active = "LIS" if active == "EST" else "EST"
             render()
         elif ch in (curses.KEY_UP, ord('k')):
             if active == "EST":
@@ -2180,11 +2319,175 @@ def process_table():
             continue
     return rows
 
+NET_STATS_COLS = [
+    ("Interface",   15, 'left'),
+    ("IP Address",  15, 'left'),
+    ("Sent",        15, 'right'),
+    ("Recv",        15, 'right'),
+    ("Sent/s",      15, 'right'),
+    ("Recv/s",      15, 'right'),
+    ("Packets Sent",15, 'right'),
+    ("Packets Recv",15, 'right'),
+]
+NET_STATS_COLORS = [2, 5, 6, 7, 8, 9, 5]
+
+def get_net_stats(last_stats, last_time, interval):
+    current_stats = psutil.net_io_counters(pernic=True)
+    addrs = psutil.net_if_addrs()
+    now = time.time()
+    
+    rows = []
+    for iface, stats in current_stats.items():
+        sent_s = recv_s = "0 B/s"
+        if last_stats and iface in last_stats:
+            sent_diff = stats.bytes_sent - last_stats[iface].bytes_sent
+            recv_diff = stats.bytes_recv - last_stats[iface].bytes_recv
+            time_diff = now - last_time
+            if time_diff > 0:
+                sent_s = f"{format_bytes(int(sent_diff / time_diff))}/s"
+                recv_s = f"{format_bytes(int(recv_diff / time_diff))}/s"
+
+        ip_addr = "N/A"
+        if iface in addrs:
+            for addr in addrs[iface]:
+                if addr.family == socket.AF_INET:
+                    ip_addr = addr.address
+                    break
+
+        rows.append([
+            iface,
+            ip_addr,
+            format_bytes(stats.bytes_sent),
+            format_bytes(stats.bytes_recv),
+            sent_s,
+            recv_s,
+            str(stats.packets_sent),
+            str(stats.packets_recv),
+        ])
+    
+    return rows, current_stats, now
+
+def _render_net_stats(stdscr, rows, start_idx, sel_idx, hide_inactive=False):
+    stdscr.erase()
+    stdscr.bkgd(curses.color_pair(1))
+    title = "Network Stats"
+    if hide_inactive:
+        title += " (h=Show Inactive)"
+    else:
+        title += " (h=Hide Inactive)"
+    title += " (Enter=Details, Backspace/Left=Back, q=Quit)"
+    border_title(stdscr, title)
+    h, w = stdscr.getmaxyx()
+    y = 2; x = 2
+    draw_table_header(stdscr, y, x, NET_STATS_COLS, NET_STATS_COLORS, sep=" ")
+    draw_hline(stdscr, y+1, 1, w-2)
+    max_lines = max(1, h - (y + 3))
+    visible = rows[start_idx:start_idx+max_lines]
+    for i, row in enumerate(visible):
+        selected = (start_idx + i) == sel_idx
+        draw_table_row(stdscr, y+2+i, x, row, NET_STATS_COLS, NET_STATS_COLORS, sep=" ", selected=selected)
+    stdscr.refresh()
+
+def _popup_net_details(stdscr, iface):
+    addrs = psutil.net_if_addrs().get(iface, [])
+    stats = psutil.net_if_stats().get(iface, None)
+
+    lines = [f" {iface} Details "]
+    lines.append("")
+    if stats:
+        lines.append(f"  Status: {'UP' if stats.isup else 'DOWN'}")
+        lines.append(f"  Speed: {stats.speed}MB/s")
+        lines.append(f"  MTU: {stats.mtu}")
+    lines.append("")
+    lines.append("  Addresses:")
+    for addr in addrs:
+        if addr.family == socket.AF_INET:
+            lines.append(f"    IPv4: {addr.address}")
+        elif addr.family == socket.AF_PACKET:
+            lines.append(f"    MAC: {addr.address}")
+        else:
+            lines.append(f"    {addr.family.name}: {addr.address}")
+
+    _popup_help(stdscr, lines)
+
+def screen_net_stats(stdscr, interval):
+    stdscr.timeout(IDLE_MS)
+    start_idx = 0
+    sel_idx = 0
+    boosting = False
+    boost_until = 0.0
+    hide_inactive = False
+    
+    last_stats, last_time = None, 0
+    all_rows, last_stats, last_time = get_net_stats(last_stats, last_time, interval)
+    rows = all_rows
+    if hide_inactive:
+        stats = psutil.net_if_stats()
+        rows = [r for r in all_rows if r[0] in stats and stats[r[0]].isup and r[0] != 'lo']
+
+    _render_net_stats(stdscr, rows, start_idx, sel_idx, hide_inactive)
+    last = time.time()
+
+    while True:
+        boosting, boost_until = _boost_timeout(stdscr, boosting, boost_until)
+        now = time.time()
+        if now - last >= interval:
+            last = now
+            all_rows, last_stats, last_time = get_net_stats(last_stats, last_time, interval)
+            rows = all_rows
+            if hide_inactive:
+                stats = psutil.net_if_stats()
+                rows = [r for r in all_rows if r[0] in stats and stats[r[0]].isup and r[0] != 'lo']
+            _render_net_stats(stdscr, rows, start_idx, sel_idx, hide_inactive)
+
+        ch = stdscr.getch()
+        if ch == -1: continue
+        if ch in (curses.KEY_BACKSPACE, curses.KEY_LEFT, 127): return
+        if ch in (ord('q'), 27): return
+        if ch == ord('t'):
+            theme_dialog(stdscr)
+            last = 0
+            _render_net_stats(stdscr, rows, start_idx, sel_idx, hide_inactive)
+        elif ch == ord('h'):
+            hide_inactive = not hide_inactive
+            all_rows, last_stats, last_time = get_net_stats(last_stats, last_time, interval)
+            rows = all_rows
+            if hide_inactive:
+                stats = psutil.net_if_stats()
+                rows = [r for r in all_rows if r[0] in stats and stats[r[0]].isup and r[0] != 'lo']
+            start_idx = 0
+            sel_idx = 0
+            _render_net_stats(stdscr, rows, start_idx, sel_idx, hide_inactive)
+        elif ch in (10, 13, curses.KEY_ENTER):
+            if rows:
+                current_selection = start_idx + sel_idx
+                if current_selection < len(rows):
+                    iface = rows[current_selection][0]
+                    _popup_net_details(stdscr, iface)
+        elif ch in (curses.KEY_UP, ord('k')):
+            if sel_idx > 0:
+                sel_idx -= 1
+            elif start_idx > 0:
+                start_idx -= 1
+            _render_net_stats(stdscr, rows, start_idx, sel_idx, hide_inactive)
+            stdscr.timeout(SCROLL_MS); boosting = True; boost_until = time.time() + (SCROLL_BOOST_MS/1000.0)
+        elif ch in (curses.KEY_DOWN, ord('j')):
+            max_lines = max(1, stdscr.getmaxyx()[0] - 6)
+            if sel_idx < max_lines - 1 and sel_idx < len(rows) - 1 - start_idx:
+                sel_idx += 1
+            elif start_idx + max_lines < len(rows):
+                start_idx += 1
+            _render_net_stats(stdscr, rows, start_idx, sel_idx, hide_inactive)
+            stdscr.timeout(SCROLL_MS); boosting = True; boost_until = time.time() + (SCROLL_BOOST_MS/1000.0)
+
+
+
 def screen_processes(stdscr, interval):
     stdscr.timeout(IDLE_MS)
     start_idx = 0
     sel_idx = 0
     sort_col = PROC_SORT_DEFAULT
+    sort_reverse = True
     boosting = False
     boost_until = 0.0
     search_term = None
@@ -2201,12 +2504,14 @@ def screen_processes(stdscr, interval):
         elif sort_col == "pid":
             try: return int(row[0])
             except: return 0
+        elif sort_col == "user":
+            return row[1]
         else:
             return row[0]
 
     rows = process_table()
-    rows.sort(key=get_sort_key, reverse=True)
-    _render_processes(stdscr, rows, start_idx, sel_idx, sort_col)
+    rows.sort(key=get_sort_key, reverse=sort_reverse)
+    _render_processes(stdscr, rows, start_idx, sel_idx, sort_col, sort_reverse)
     last = time.time()
 
     while True:
@@ -2215,7 +2520,7 @@ def screen_processes(stdscr, interval):
         if now - last >= interval:
             last = now
             rows = process_table()
-            rows.sort(key=get_sort_key, reverse=True)
+            rows.sort(key=get_sort_key, reverse=sort_reverse)
 
             if sticky_pid is not None:
                 found_sticky = False
@@ -2229,21 +2534,21 @@ def screen_processes(stdscr, interval):
                 if not found_sticky:
                     sticky_pid = None # process is gone
 
-            _render_processes(stdscr, rows, start_idx, sel_idx, sort_col)
+            _render_processes(stdscr, rows, start_idx, sel_idx, sort_col, sort_reverse)
 
         ch = stdscr.getch()
         if ch == -1: continue
         if ch in (curses.KEY_BACKSPACE, curses.KEY_LEFT, 127): return
         if ch in (ord('q'), 27): return
-        if ch == ord('t'): 
-            theme_dialog(stdscr); 
-            last = 0; 
-            _render_processes(stdscr, rows, start_idx, sel_idx, sort_col)
+        if ch == ord('t'):
+            theme_dialog(stdscr)
+            last = 0
+            _render_processes(stdscr, rows, start_idx, sel_idx, sort_col, sort_reverse)
         elif ch == ord('l'):
             screen_ignored_list(stdscr)
             rows = process_table()
-            rows.sort(key=get_sort_key, reverse=True)
-            _render_processes(stdscr, rows, start_idx, sel_idx, sort_col)
+            rows.sort(key=get_sort_key, reverse=sort_reverse)
+            _render_processes(stdscr, rows, start_idx, sel_idx, sort_col, sort_reverse)
         elif ch == ord('i'):
             if rows:
                 current_selection = start_idx + sel_idx
@@ -2253,10 +2558,10 @@ def screen_processes(stdscr, interval):
                         IGNORED_PROCESSES.add(name_to_ignore)
                         save_ignored_processes()
                         rows = process_table()
-                        rows.sort(key=get_sort_key, reverse=True)
+                        rows.sort(key=get_sort_key, reverse=sort_reverse)
                         start_idx = 0
                         sel_idx = 0
-                        _render_processes(stdscr, rows, start_idx, sel_idx, sort_col)
+                        _render_processes(stdscr, rows, start_idx, sel_idx, sort_col, sort_reverse)
         elif ch == ord('s'):
             search_term = _prompt(stdscr, "Search processes:", "").strip()
             last_search_idx = -1
@@ -2272,7 +2577,7 @@ def screen_processes(stdscr, interval):
                         last_search_idx = i
                         sticky_pid = int(r[0])
                         break
-            _render_processes(stdscr, rows, start_idx, sel_idx, sort_col)
+            _render_processes(stdscr, rows, start_idx, sel_idx, sort_col, sort_reverse)
         elif ch == ord('n'):
             if search_term:
                 sticky_pid = None
@@ -2296,14 +2601,14 @@ def screen_processes(stdscr, interval):
                             last_search_idx = i
                             sticky_pid = int(rows[i][0])
                             break
-            _render_processes(stdscr, rows, start_idx, sel_idx, sort_col)
+            _render_processes(stdscr, rows, start_idx, sel_idx, sort_col, sort_reverse)
         elif ch == curses.KEY_UP:
             sticky_pid = None
             if sel_idx > 0:
                 sel_idx -= 1
             elif start_idx > 0:
                 start_idx -= 1
-            _render_processes(stdscr, rows, start_idx, sel_idx, sort_col)
+            _render_processes(stdscr, rows, start_idx, sel_idx, sort_col, sort_reverse)
             stdscr.timeout(SCROLL_MS); boosting = True; boost_until = time.time() + (SCROLL_BOOST_MS/1000.0)
         elif ch in (curses.KEY_DOWN, ord('j')):
             sticky_pid = None
@@ -2312,12 +2617,17 @@ def screen_processes(stdscr, interval):
                 sel_idx += 1
             elif start_idx + max_lines < len(rows):
                 start_idx += 1
-            _render_processes(stdscr, rows, start_idx, sel_idx, sort_col)
+            _render_processes(stdscr, rows, start_idx, sel_idx, sort_col, sort_reverse)
             stdscr.timeout(SCROLL_MS); boosting = True; boost_until = time.time() + (SCROLL_BOOST_MS/1000.0)
-        elif ch == ord('c') or ch == ord('m') or ch == ord('p'):
-            sort_col = {ord('c'): "cpu", ord('m'): "mem", ord('p'): "pid"}.get(ch, "cpu")
-            rows.sort(key=get_sort_key, reverse=True)
-            _render_processes(stdscr, rows, start_idx, sel_idx, sort_col)
+        elif ch in (ord('c'), ord('m'), ord('p'), ord('u')):
+            new_sort_col = {ord('c'): "cpu", ord('m'): "mem", ord('p'): "pid", ord('u'): "user"}.get(ch)
+            if new_sort_col == sort_col:
+                sort_reverse = not sort_reverse
+            else:
+                sort_col = new_sort_col
+                sort_reverse = True
+            rows.sort(key=get_sort_key, reverse=sort_reverse)
+            _render_processes(stdscr, rows, start_idx, sel_idx, sort_col, sort_reverse)
         elif ch == ord('k'):
             if rows:
                 current_selection = start_idx + sel_idx
@@ -2340,7 +2650,7 @@ def screen_processes(stdscr, interval):
                 " l              : list ignored processes",
                 " s              : search processes",
                 " n              : next search match",
-                " c/m/p          : sort by cpu/mem/pid",
+                " c/m/p/u        : sort by cpu/mem/pid/user",
                 " t              : theme dialog",
                 " Backspace/Left : back to menu",
                 " q              : quit",
@@ -2406,13 +2716,13 @@ def screen_processes(stdscr, interval):
                 " q              : quit",
             ])
 
-def _render_processes(stdscr, rows, start_idx, sel_idx, sort_col):
+def _render_processes(stdscr, rows, start_idx, sel_idx, sort_col, sort_reverse):
     stdscr.erase()
     stdscr.bkgd(curses.color_pair(1))
-    border_title(stdscr, f"Processes (Sort: {sort_col.upper()}) (c=CPU, m=MEM, p=PID, x=Kill, ?=Help)")
+    border_title(stdscr, f"Processes (Sort: {sort_col.upper()}) (c=CPU, m=MEM, p=PID, u=User, x=Kill, ?=Help)")
     h, w = stdscr.getmaxyx()
     y = 2; x = 2
-    draw_table_header(stdscr, y, x, PROC_COLS, PROC_COLORS, sep=" ")
+    draw_table_header(stdscr, y, x, PROC_COLS, PROC_COLORS, sep=" ", sort_col=sort_col, sort_reverse=sort_reverse)
     draw_hline(stdscr, y+1, 1, w-2)
     max_lines = max(1, h - (y + 3))
     visible = rows[start_idx:start_idx+max_lines]
@@ -2546,13 +2856,15 @@ def run(stdscr, interval, initial_theme):
         elif sel == 3: screen_connections(stdscr, interval, "Listening")
         elif sel == 4: screen_both(stdscr, interval)
         elif sel == 5: screen_processes(stdscr, interval)
-        elif sel == 6: break
+        elif sel == 6: screen_net_stats(stdscr, interval)
+        elif sel == 7: break
 
 def main():
+    CONFIG.load_config()
     load_ignored_processes()
     parser = argparse.ArgumentParser(add_help=False, description=f"NetScope {VERSION}")
-    parser.add_argument("-d", type=int, default=3, help="Update interval in seconds (default 3)")
-    parser.add_argument("-t", "--theme", default="blue", help="Theme name from /etc/netscope/themes (default blue)")
+    parser.add_argument("-d", type=int, default=CONFIG.get('update_interval'), help=f"Update interval in seconds (default: {CONFIG.get('update_interval')})")
+    parser.add_argument("-t", "--theme", default=CONFIG.get('theme'), help=f"Theme name from /etc/netscope/themes (default: {CONFIG.get('theme')})")
     parser.add_argument("-h", action="store_true", help="Show help")
     parser.add_argument("-v", action="store_true", help="Show version")
     args = parser.parse_args()
@@ -2563,7 +2875,7 @@ def main():
     try:
         curses.wrapper(lambda stdscr: run(stdscr, max(1, int(args.d)), args.theme))
     finally:
-        _osc_reset_default_bg()
+        ThemeManager._osc_reset_default_bg()
 
 if __name__ == "__main__":
     main()

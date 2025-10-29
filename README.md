@@ -1,6 +1,11 @@
-# NetScope 2.0.12
+# NetScope 2.0.13
 
 NetScope is a powerful network and process monitoring tool inspired by htop and netstat. It lets you inspect established and listening connections, browse running processes, and interact with them in a fast, keyboard-friendly UI. New in this release: a theming system with truecolor backgrounds (OSC 11) when supported, automatic 256-color/16-color fallbacks, and runtime theme switching (t). Themes can be supplied as JSON in /etc/netscope/themes/*.json; the default blue theme remains available out of the box.
+
+### Recent Changes
+
+- **v2.0.13**: Fixed a crash in the connection details popup that occurred when the process command was too long for the screen.
+
 
 ## Features
 
